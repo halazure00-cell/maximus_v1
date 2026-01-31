@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --ui-bg: #0b0d10;
+  --ui-surface: #14161b;
+  --ui-surface-soft: #1c2026;
+  --ui-surface-strong: #222831;
+  --ui-text: #f5f7fa;
+  --ui-text-muted: #a8b0bb;
+  --ui-accent: #ffb300;
+  --ui-accent-strong: #ff7a00;
+  --ui-border: rgba(255, 255, 255, 0.12);
+  --ui-success: #2bd4b6;
+  --ui-warning: #f5c400;
+  --ui-danger: #ff6b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+  color: var(--ui-text);
+  background: radial-gradient(circle at 20% 20%, rgba(255, 179, 0, 0.12), transparent 40%),
+    radial-gradient(circle at 80% 10%, rgba(255, 122, 0, 0.12), transparent 45%),
+    linear-gradient(180deg, rgba(20, 23, 28, 0.95), rgba(8, 10, 13, 1));
+  background-attachment: fixed;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: "Space Grotesk", system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  input,
+  textarea,
+  select {
+    color: var(--ui-text);
+  }
+}
+
+@layer components {
+  .glass {
+    background: linear-gradient(145deg, rgba(24, 28, 34, 0.92), rgba(15, 18, 22, 0.98));
+    border: 1px solid var(--ui-border);
+    box-shadow: 0 12px 30px -18px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  .soft-border {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+  }
+
+  .btn-primary {
+    @apply inline-flex min-h-[48px] items-center justify-center rounded-2xl px-5 py-3 text-sm font-semibold text-night-950 transition;
+    background: linear-gradient(120deg, #ffd03a, #ff8a2b);
+    box-shadow: 0 12px 24px -14px rgba(255, 122, 0, 0.7);
+  }
+
+  .btn-outline {
+    @apply inline-flex min-h-[48px] items-center justify-center rounded-2xl border border-white/15 px-5 py-3 text-sm font-semibold text-white transition;
+    background: rgba(18, 19, 26, 0.8);
+  }
+
+  .btn-ghost {
+    @apply inline-flex min-h-[44px] items-center justify-center rounded-2xl px-4 py-2 text-sm font-semibold text-white/80 transition;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .pill {
+    @apply rounded-full px-3 py-1 text-xs font-semibold;
+  }
+
+  .input-primary {
+    @apply w-full rounded-2xl border border-white/15 bg-night-900/80 px-4 py-3 text-sm text-white shadow-inner;
+  }
+
+  .input-primary::placeholder {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .section-title {
+    @apply text-lg font-semibold tracking-tight text-white;
+  }
+
+  .subtle-text {
+    @apply text-xs text-white/60;
+  }
+}
