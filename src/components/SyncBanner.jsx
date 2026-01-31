@@ -1,6 +1,6 @@
-import { useSync } from '../context/SyncContext'
+import { useSync } from '../context/useSync'
 import { formatDateTime } from '../lib/formatters'
-import { useAlert } from '../context/AlertContext'
+import { useAlert } from '../context/useAlert'
 
 const SyncBanner = () => {
   const { status, lastSyncAt, lastResult, error, runSync } = useSync()

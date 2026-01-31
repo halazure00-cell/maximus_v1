@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { useEntityList } from '../lib/hooks/useEntityList'
 import { createRecord } from '../lib/localStore'
 import { formatDateTime } from '../lib/formatters'
 import InputField from '../components/InputField'
 import EmptyState from '../components/EmptyState'
-import { useAlert } from '../context/AlertContext'
+import { useAlert } from '../context/useAlert'
 
 const Notes = () => {
   const { user } = useAuth()
@@ -37,7 +37,7 @@ const Notes = () => {
       )
       setForm({ title: '', note: '', reminder: '' })
       showToast({ title: 'Catatan tersimpan', message: 'Catatan berhasil dicatat.', type: 'success' })
-    } catch (error) {
+    } catch {
       showToast({ title: 'Gagal menyimpan', message: 'Coba lagi dalam beberapa saat.', type: 'error' })
     } finally {
       setLoading(false)

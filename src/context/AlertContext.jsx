@@ -1,8 +1,7 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import ToastStack from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
-
-const AlertContext = createContext(null)
+import AlertContext from './alertContext'
 
 const createId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -79,12 +78,4 @@ export const AlertProvider = ({ children }) => {
       />
     </AlertContext.Provider>
   )
-}
-
-export const useAlert = () => {
-  const context = useContext(AlertContext)
-  if (!context) {
-    throw new Error('useAlert must be used within AlertProvider')
-  }
-  return context
 }

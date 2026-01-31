@@ -1,9 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { syncAll } from '../lib/syncEngine'
 import { getSettings } from '../lib/localStore'
-import { useAuth } from './AuthContext'
-
-const SyncContext = createContext(null)
+import { useAuth } from './useAuth'
+import SyncContext from './syncContext'
 
 export const SyncProvider = ({ children }) => {
   const { user } = useAuth()
@@ -39,11 +38,12 @@ export const SyncProvider = ({ children }) => {
 
   useEffect(() => {
     if (!user) return
-    runSync()
+    const timeout = setTimeout(() => runSync(), 0)
     const handleOnline = () => runSync()
     const interval = setInterval(() => runSync(), 5 * 60 * 1000)
     window.addEventListener('online', handleOnline)
     return () => {
+      clearTimeout(timeout)
       clearInterval(interval)
       window.removeEventListener('online', handleOnline)
     }
@@ -61,12 +61,4 @@ export const SyncProvider = ({ children }) => {
   )
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>
-}
-
-export const useSync = () => {
-  const context = useContext(SyncContext)
-  if (!context) {
-    throw new Error('useSync must be used within SyncProvider')
-  }
-  return context
 }

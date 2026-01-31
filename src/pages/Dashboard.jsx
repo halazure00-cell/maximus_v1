@@ -7,8 +7,8 @@ import { supabase } from '../lib/supabaseClient'
 import { getSettings, saveSettings, upsertRecord } from '../lib/localStore'
 import { subscribe } from '../lib/events'
 import { createId, roundCoordinate } from '../lib/utils'
-import { useAuth } from '../context/AuthContext'
-import { useAlert } from '../context/AlertContext'
+import { useAuth } from '../context/useAuth'
+import { useAlert } from '../context/useAlert'
 import StatCard from '../components/StatCard'
 import SectionCard from '../components/SectionCard'
 import HeatmapLayer from '../components/HeatmapLayer'
@@ -122,12 +122,51 @@ const Dashboard = () => {
   }, [])
 
   useEffect(() => {
+    const startWatch = () => {
+      if (!navigator.geolocation) {
+        showToast({ title: 'Lokasi', message: 'Perangkat tidak mendukung GPS.', type: 'error' })
+        setLocationStatus('error')
+        return
+      }
+      if (locationWatchRef.current !== null) return
+      setLocationStatus('loading')
+      locationWatchRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          setLiveLocation({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            updatedAt: Date.now(),
+          })
+          setLocationStatus('ready')
+        },
+        (geoError) => {
+          setLocationStatus('error')
+          let message = 'Gagal mengambil lokasi.'
+          if (geoError?.code === 1) message = 'Izin lokasi ditolak.'
+          if (geoError?.code === 2) message = 'Lokasi tidak tersedia.'
+          if (geoError?.code === 3) message = 'Permintaan lokasi timeout.'
+          showToast({ title: 'Lokasi', message, type: 'error' })
+        },
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 10000 }
+      )
+    }
+
+    const stopWatch = () => {
+      if (locationWatchRef.current !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(locationWatchRef.current)
+        locationWatchRef.current = null
+      }
+      setLocationStatus('idle')
+      setLiveLocation(null)
+    }
+
     if (liveLocationEnabled) {
-      startLocationWatch()
+      startWatch()
       return
     }
-    stopLocationWatch()
-  }, [liveLocationEnabled])
+    stopWatch()
+  }, [liveLocationEnabled, showToast])
 
   const summary = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10)
@@ -199,7 +238,7 @@ const Dashboard = () => {
         if (active) {
           setWeatherState({ status: 'ready', data })
         }
-      } catch (error) {
+      } catch {
         if (active) {
           setWeatherState({ status: 'error', data: null })
         }
@@ -226,7 +265,7 @@ const Dashboard = () => {
         if (active) {
           setHolidayState({ status: 'ready', dates })
         }
-      } catch (error) {
+      } catch {
         if (active) {
           setHolidayState({ status: 'error', dates: null })
         }
@@ -420,49 +459,10 @@ const Dashboard = () => {
     })
   }, [heatmapData.ranked, liveLocation])
 
-  const startLocationWatch = () => {
-    if (!navigator.geolocation) {
-      showToast({ title: 'Lokasi', message: 'Perangkat tidak mendukung GPS.', type: 'error' })
-      setLocationStatus('error')
-      return
-    }
-    if (locationWatchRef.current !== null) return
-    setLocationStatus('loading')
-    locationWatchRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        setLiveLocation({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-          updatedAt: Date.now(),
-        })
-        setLocationStatus('ready')
-      },
-      (error) => {
-        setLocationStatus('error')
-        let message = 'Gagal mengambil lokasi.'
-        if (error?.code === 1) message = 'Izin lokasi ditolak.'
-        if (error?.code === 2) message = 'Lokasi tidak tersedia.'
-        if (error?.code === 3) message = 'Permintaan lokasi timeout.'
-        showToast({ title: 'Lokasi', message, type: 'error' })
-      },
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 10000 }
-    )
-  }
-
-  const stopLocationWatch = () => {
-    if (locationWatchRef.current !== null && navigator.geolocation) {
-      navigator.geolocation.clearWatch(locationWatchRef.current)
-      locationWatchRef.current = null
-    }
-    setLocationStatus('idle')
-    setLiveLocation(null)
-  }
-
   const updateSettings = async (values) => {
     try {
       await saveSettings(values)
-    } catch (error) {
+    } catch {
       showToast({ title: 'Gagal menyimpan', message: 'Coba lagi dalam beberapa saat.', type: 'error' })
     }
   }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { listRecords } from '../localStore'
 import { subscribe } from '../events'
 
@@ -6,7 +6,7 @@ export const useEntityList = (storeName) => {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true)
     const records = await listRecords(storeName)
     const sorted = records.sort((a, b) =>
@@ -14,17 +14,22 @@ export const useEntityList = (storeName) => {
     )
     setItems(sorted)
     setLoading(false)
-  }
+  }, [storeName])
 
   useEffect(() => {
-    refresh()
+    const timeout = setTimeout(() => {
+      refresh()
+    }, 0)
     const unsub = subscribe((event) => {
       if (event.storeName === storeName) {
         refresh()
       }
     })
-    return unsub
-  }, [storeName])
+    return () => {
+      clearTimeout(timeout)
+      unsub()
+    }
+  }, [storeName, refresh])
 
   return { items, loading, refresh }
 }

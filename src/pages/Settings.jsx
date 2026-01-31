@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useAuth } from '../context/AuthContext'
-import { useSync } from '../context/SyncContext'
+import { useAuth } from '../context/useAuth'
+import { useSync } from '../context/useSync'
 import { getSettings, saveSettings } from '../lib/localStore'
 import { formatDateTime } from '../lib/formatters'
-import { useAlert } from '../context/AlertContext'
+import { useAlert } from '../context/useAlert'
 
 const Settings = () => {
   const { user, signOut } = useAuth()
@@ -81,7 +81,7 @@ const Settings = () => {
       setUseWeather(nextUseWeather)
       setUseHoliday(nextUseHoliday)
       showToast({ title: 'Pengaturan tersimpan', message: 'Preferensi peta diperbarui.', type: 'success' })
-    } catch (error) {
+    } catch {
       showToast({ title: 'Gagal menyimpan', message: 'Coba lagi dalam beberapa saat.', type: 'error' })
     } finally {
       setSaving(false)

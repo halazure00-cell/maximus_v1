@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { useEntityList } from '../lib/hooks/useEntityList'
 import { createRecord } from '../lib/localStore'
 import { formatCurrency, formatDateTime } from '../lib/formatters'
 import { toNumber } from '../lib/utils'
 import InputField from '../components/InputField'
 import EmptyState from '../components/EmptyState'
-import { useAlert } from '../context/AlertContext'
+import { useAlert } from '../context/useAlert'
 
 const Earnings = () => {
   const { user } = useAuth()
@@ -38,7 +38,7 @@ const Earnings = () => {
       )
       setForm({ source: '', amount: '', date: new Date().toISOString().slice(0, 16) })
       showToast({ title: 'Pendapatan tersimpan', message: 'Data pemasukan dicatat.', type: 'success' })
-    } catch (error) {
+    } catch {
       showToast({ title: 'Gagal menyimpan', message: 'Coba lagi dalam beberapa saat.', type: 'error' })
     } finally {
       setLoading(false)

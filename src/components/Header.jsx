@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
-import { useSync } from '../context/SyncContext'
+import { useAuth } from '../context/useAuth'
+import { useSync } from '../context/useSync'
 
 const navItems = [
   { to: '/', label: 'Dasbor' },

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { useEntityList } from '../lib/hooks/useEntityList'
 import { addHeatmapPoint, createRecord, getSettings } from '../lib/localStore'
 import { formatCurrency, formatDateTime } from '../lib/formatters'
 import { toNumber } from '../lib/utils'
 import InputField from '../components/InputField'
 import EmptyState from '../components/EmptyState'
-import { useAlert } from '../context/AlertContext'
+import { useAlert } from '../context/useAlert'
 
 const Trips = () => {
   const { user } = useAuth()
@@ -107,7 +107,7 @@ const Trips = () => {
       setLocationStatus('')
       setShowCoords(false)
       showToast({ title: 'Trip tersimpan', message: 'Perjalanan berhasil dicatat.', type: 'success' })
-    } catch (error) {
+    } catch {
       showToast({ title: 'Gagal menyimpan', message: 'Coba lagi dalam beberapa saat.', type: 'error' })
     } finally {
       setLoading(false)
