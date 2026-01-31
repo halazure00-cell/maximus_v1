@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { MapContainer, TileLayer } from 'react-leaflet'
+import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet'
 import { useEntityList } from '../lib/hooks/useEntityList'
 import { formatCurrency } from '../lib/formatters'
 import { supabase } from '../lib/supabaseClient'
-import { getSettings, upsertRecord } from '../lib/localStore'
+import { getSettings, saveSettings, upsertRecord } from '../lib/localStore'
+import { subscribe } from '../lib/events'
 import { createId, roundCoordinate } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import { useAlert } from '../context/AlertContext'
@@ -13,14 +14,45 @@ import SectionCard from '../components/SectionCard'
 import HeatmapLayer from '../components/HeatmapLayer'
 import {
   TIME_BUCKETS,
+  buildIncomeBucketStats,
   fetchHolidaySet,
   fetchWeather,
+  getDeadheadPenalty,
   getConfidenceModifier,
   getJakartaDateKey,
   getJakartaHour,
+  getDistanceKm,
+  getNetIncomeFactors,
+  getOverallNetPerHour,
   getTimeBucket,
   getWeatherModifier,
 } from '../lib/heatmapSmart'
+
+const UserLocationLayer = ({ location, followMe }) => {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!map || !location || !followMe) return
+    map.setView([location.lat, location.lng], Math.max(map.getZoom(), 13), { animate: true })
+  }, [map, location, followMe])
+
+  if (!location) return null
+
+  return (
+    <>
+      <Circle
+        center={[location.lat, location.lng]}
+        radius={Math.max(20, location.accuracy || 20)}
+        pathOptions={{ color: '#38bdf8', fillColor: '#38bdf8', fillOpacity: 0.15 }}
+      />
+      <CircleMarker
+        center={[location.lat, location.lng]}
+        radius={6}
+        pathOptions={{ color: '#0ea5e9', fillColor: '#38bdf8', fillOpacity: 0.9 }}
+      />
+    </>
+  )
+}
 
 const Dashboard = () => {
   const { user } = useAuth()
@@ -34,6 +66,17 @@ const Dashboard = () => {
   const [useWeather, setUseWeather] = useState(true)
   const [useHoliday, setUseHoliday] = useState(true)
   const [mapPrecision, setMapPrecision] = useState(4)
+  const [deadheadCostPerKm, setDeadheadCostPerKm] = useState(2000)
+  const [deadheadRadiusKm, setDeadheadRadiusKm] = useState(3)
+  const [heatmapGoal, setHeatmapGoal] = useState('order')
+  const [useCurrentHour, setUseCurrentHour] = useState(true)
+  const [highContrastHeatmap, setHighContrastHeatmap] = useState(false)
+  const [heatmapIntensity, setHeatmapIntensity] = useState(1)
+  const [liveLocation, setLiveLocation] = useState(null)
+  const [liveLocationEnabled, setLiveLocationEnabled] = useState(false)
+  const [locationStatus, setLocationStatus] = useState('idle')
+  const [followMe, setFollowMe] = useState(false)
+  const locationWatchRef = useRef(null)
   const [weatherState, setWeatherState] = useState({ status: 'idle', data: null })
   const [holidayState, setHolidayState] = useState({ status: 'idle', dates: null })
   const [importState, setImportState] = useState({
@@ -44,12 +87,47 @@ const Dashboard = () => {
   })
 
   useEffect(() => {
+    const applySettings = (settings) => {
+      setMapPrecision(settings.mapPrecision || 4)
+      setDeadheadCostPerKm(settings.deadheadCostPerKm ?? 2000)
+      setDeadheadRadiusKm(settings.deadheadRadiusKm ?? 3)
+      setHeatmapGoal(settings.heatmapGoal || 'order')
+      setUseCurrentHour(settings.useCurrentHour ?? true)
+      setHighContrastHeatmap(settings.highContrastHeatmap ?? false)
+      setHeatmapIntensity(settings.heatmapIntensity ?? 1)
+      setLiveLocationEnabled(settings.liveLocationEnabled ?? false)
+      setFollowMe(settings.followMe ?? false)
+      setUseWeather(settings.useWeather ?? true)
+      setUseHoliday(settings.useHoliday ?? true)
+    }
     const loadSettings = async () => {
       const settings = await getSettings()
-      setMapPrecision(settings.mapPrecision || 4)
+      applySettings(settings)
     }
     loadSettings()
+    const unsub = subscribe((event) => {
+      if (event.storeName === 'settings') {
+        loadSettings()
+      }
+    })
+    return unsub
   }, [])
+
+  useEffect(() => {
+    return () => {
+      if (locationWatchRef.current !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(locationWatchRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (liveLocationEnabled) {
+      startLocationWatch()
+      return
+    }
+    stopLocationWatch()
+  }, [liveLocationEnabled])
 
   const summary = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10)
@@ -80,6 +158,18 @@ const Dashboard = () => {
     })
   }, [heatmapPoints, rangeDays])
 
+  const currentBucket = getTimeBucket(getJakartaHour())
+
+  const activeHeatmapPoints = useMemo(() => {
+    if (!useCurrentHour) return filteredHeatmapPoints
+    return filteredHeatmapPoints.filter((point) => {
+      const timestamp = point.created_at || point.updated_at
+      if (!timestamp) return false
+      const bucket = getTimeBucket(getJakartaHour(new Date(timestamp)))
+      return bucket.id === currentBucket.id
+    })
+  }, [filteredHeatmapPoints, useCurrentHour, currentBucket])
+
   const mapCenter = useMemo(() => {
     if (!filteredHeatmapPoints.length) return [-6.9147, 107.6098]
     const totals = filteredHeatmapPoints.reduce(
@@ -97,7 +187,7 @@ const Dashboard = () => {
   }, [filteredHeatmapPoints])
 
   useEffect(() => {
-    if (!useWeather) {
+    if (heatmapGoal === 'order' || !useWeather) {
       setWeatherState({ status: 'idle', data: null })
       return
     }
@@ -119,10 +209,10 @@ const Dashboard = () => {
     return () => {
       active = false
     }
-  }, [mapCenter, useWeather])
+  }, [mapCenter, useWeather, heatmapGoal])
 
   useEffect(() => {
-    if (!useHoliday) {
+    if (heatmapGoal === 'order' || !useHoliday) {
       setHolidayState({ status: 'idle', dates: null })
       return
     }
@@ -146,7 +236,7 @@ const Dashboard = () => {
     return () => {
       active = false
     }
-  }, [useHoliday])
+  }, [useHoliday, heatmapGoal])
 
   const bucketStats = useMemo(() => {
     const stats = TIME_BUCKETS.map(() => ({ count: 0, sum: 0 }))
@@ -162,7 +252,14 @@ const Dashboard = () => {
     return stats
   }, [filteredHeatmapPoints])
 
-  const currentBucket = getTimeBucket(getJakartaHour())
+  const incomeStats = useMemo(
+    () => buildIncomeBucketStats({ trips, earnings, expenses }),
+    [trips, earnings, expenses]
+  )
+
+  const incomeFactors = useMemo(() => getNetIncomeFactors(incomeStats), [incomeStats])
+
+  const overallNetPerHour = useMemo(() => getOverallNetPerHour(incomeStats), [incomeStats])
 
   const timeModifier = useMemo(() => {
     const total = bucketStats.reduce(
@@ -180,15 +277,17 @@ const Dashboard = () => {
   }, [bucketStats, currentBucket])
 
   const weatherModifier = useMemo(() => {
+    if (heatmapGoal === 'order') return 1
     if (!useWeather) return 1
     return getWeatherModifier(weatherState.data)
-  }, [useWeather, weatherState])
+  }, [heatmapGoal, useWeather, weatherState])
 
   const holidayModifier = useMemo(() => {
+    if (heatmapGoal === 'order') return 1
     if (!useHoliday || !holidayState.dates) return 1
     const jakartaDate = getJakartaDateKey()
     return holidayState.dates.has(jakartaDate) ? 1.1 : 1
-  }, [useHoliday, holidayState])
+  }, [heatmapGoal, useHoliday, holidayState])
 
   const weatherSummary = useMemo(() => {
     if (!useWeather) return 'Cuaca dimatikan'
@@ -211,41 +310,178 @@ const Dashboard = () => {
     return holidayState.dates.has(jakartaDate) ? 'Hari libur nasional' : 'Hari kerja'
   }, [useHoliday, holidayState])
 
-  const heatPoints = useMemo(() => {
-    if (!filteredHeatmapPoints.length) return []
+  const bucketPoints = useMemo(() => {
+    const map = new Map()
+    activeHeatmapPoints.forEach((point) => {
+      if (!point.lat || !point.lng) return
+      const timestamp = point.created_at || point.updated_at
+      if (!timestamp) return
+      const bucket = getTimeBucket(getJakartaHour(new Date(timestamp)))
+      const list = map.get(bucket.id) || []
+      list.push({ lat: point.lat, lng: point.lng })
+      map.set(bucket.id, list)
+    })
+    return map
+  }, [activeHeatmapPoints])
+
+  const heatmapData = useMemo(() => {
+    if (!activeHeatmapPoints.length) return { points: [], ranked: [] }
     const grouped = new Map()
-    filteredHeatmapPoints.forEach((point) => {
+    activeHeatmapPoints.forEach((point) => {
       if (!point.lat || !point.lng) return
       const lat = roundCoordinate(point.lat, mapPrecision)
       const lng = roundCoordinate(point.lng, mapPrecision)
+      const timestamp = point.created_at || point.updated_at
+      const bucket = timestamp
+        ? getTimeBucket(getJakartaHour(new Date(timestamp)))
+        : currentBucket
+      const incomeFactor = heatmapGoal === 'order' ? 1 : (incomeFactors[bucket.id] ?? 1)
+      const netPerHour = incomeStats[bucket.id]?.perHour ?? overallNetPerHour
+      const candidates = bucketPoints.get(bucket.id) || []
+      const deadheadPenalty = heatmapGoal === 'order'
+        ? 1
+        : getDeadheadPenalty({
+          point: { lat, lng },
+          candidates,
+          radiusKm: Number(deadheadRadiusKm) || 3,
+          costPerKm: Number(deadheadCostPerKm) || 2000,
+          netPerHour,
+          fallbackNetPerHour: overallNetPerHour || 20000,
+        })
       const key = `${lat}:${lng}`
       const intensity = Number.isFinite(point.intensity) ? point.intensity : 0.7
-      const entry = grouped.get(key) || { lat, lng, sum: 0, count: 0 }
+      const entry = grouped.get(key) || {
+        lat,
+        lng,
+        sum: 0,
+        count: 0,
+        incomeSum: 0,
+        deadheadSum: 0,
+      }
       entry.sum += intensity
       entry.count += 1
+      entry.incomeSum += incomeFactor
+      entry.deadheadSum += deadheadPenalty
       grouped.set(key, entry)
     })
 
     const scored = Array.from(grouped.values()).map((cell) => {
       const avgIntensity = cell.sum / cell.count
+      const avgIncome = cell.incomeSum / cell.count
+      const avgDeadhead = cell.deadheadSum / cell.count
       const confidence = getConfidenceModifier(cell.count)
-      const score = avgIntensity * timeModifier * weatherModifier * holidayModifier * confidence
+      const effectiveTimeModifier = heatmapGoal === 'order' ? 1 : timeModifier
+      const score =
+        avgIntensity *
+        avgIncome *
+        avgDeadhead *
+        effectiveTimeModifier *
+        weatherModifier *
+        holidayModifier *
+        confidence
       return { ...cell, score }
     })
 
     const maxScore = Math.max(...scored.map((cell) => cell.score), 0)
-    return scored.map((cell) => [
+    const points = scored.map((cell) => [
       cell.lat,
       cell.lng,
-      maxScore ? cell.score / maxScore : 0.4,
+      Math.min(1, Math.max(0.25, maxScore ? cell.score / maxScore : 0.4) * heatmapIntensity),
     ])
+    const ranked = [...scored]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+    return { points, ranked }
   }, [
-    filteredHeatmapPoints,
+    activeHeatmapPoints,
     mapPrecision,
+    deadheadCostPerKm,
+    deadheadRadiusKm,
+    incomeFactors,
+    incomeStats,
+    overallNetPerHour,
+    bucketPoints,
+    currentBucket,
+    heatmapGoal,
+    heatmapIntensity,
     timeModifier,
     weatherModifier,
     holidayModifier,
   ])
+
+  const rankedWithDistance = useMemo(() => {
+    if (!liveLocation) return heatmapData.ranked
+    return heatmapData.ranked.map((cell) => {
+      const distanceKm = getDistanceKm(
+        { lat: liveLocation.lat, lng: liveLocation.lng },
+        { lat: cell.lat, lng: cell.lng }
+      )
+      return { ...cell, distanceKm }
+    })
+  }, [heatmapData.ranked, liveLocation])
+
+  const startLocationWatch = () => {
+    if (!navigator.geolocation) {
+      showToast({ title: 'Lokasi', message: 'Perangkat tidak mendukung GPS.', type: 'error' })
+      setLocationStatus('error')
+      return
+    }
+    if (locationWatchRef.current !== null) return
+    setLocationStatus('loading')
+    locationWatchRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        setLiveLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          updatedAt: Date.now(),
+        })
+        setLocationStatus('ready')
+      },
+      (error) => {
+        setLocationStatus('error')
+        let message = 'Gagal mengambil lokasi.'
+        if (error?.code === 1) message = 'Izin lokasi ditolak.'
+        if (error?.code === 2) message = 'Lokasi tidak tersedia.'
+        if (error?.code === 3) message = 'Permintaan lokasi timeout.'
+        showToast({ title: 'Lokasi', message, type: 'error' })
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 10000 }
+    )
+  }
+
+  const stopLocationWatch = () => {
+    if (locationWatchRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(locationWatchRef.current)
+      locationWatchRef.current = null
+    }
+    setLocationStatus('idle')
+    setLiveLocation(null)
+  }
+
+  const updateSettings = async (values) => {
+    try {
+      await saveSettings(values)
+    } catch (error) {
+      showToast({ title: 'Gagal menyimpan', message: 'Coba lagi dalam beberapa saat.', type: 'error' })
+    }
+  }
+
+  const handleToggleLiveLocation = async () => {
+    const nextEnabled = !liveLocationEnabled
+    const nextFollow = nextEnabled ? followMe : false
+    setLiveLocationEnabled(nextEnabled)
+    setFollowMe(nextFollow)
+    await updateSettings({ liveLocationEnabled: nextEnabled, followMe: nextFollow })
+  }
+
+  const handleToggleFollowMe = async () => {
+    const nextFollow = !followMe
+    const nextEnabled = nextFollow ? true : liveLocationEnabled
+    setFollowMe(nextFollow)
+    setLiveLocationEnabled(nextEnabled)
+    await updateSettings({ followMe: nextFollow, liveLocationEnabled: nextEnabled })
+  }
 
   const handleImportFile = async (event) => {
     const file = event.target.files?.[0]
@@ -430,56 +666,155 @@ const Dashboard = () => {
           className="hidden"
           onChange={handleImportFile}
         />
-        <div className="h-72 overflow-hidden rounded-2xl border border-white/10">
+        <div className="relative isolate z-0 h-72 overflow-hidden rounded-2xl border border-white/10">
           <MapContainer
             center={mapCenter}
             zoom={12}
-            className="h-full w-full"
+            className="h-full w-full z-0"
           >
             <TileLayer
               attribution="&copy; OpenStreetMap contributors"
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            <HeatmapLayer points={heatPoints} />
+            <UserLocationLayer location={liveLocation} followMe={followMe} />
+            <HeatmapLayer points={heatmapData.points} highContrast={highContrastHeatmap} />
           </MapContainer>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2">
+          <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-2">
             <button
               type="button"
-              className={`pill ${rangeDays === 7 ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
-              onClick={() => setRangeDays(7)}
+              className={`flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white/80 shadow-lg ${liveLocationEnabled ? 'bg-sky-400/30 text-sky-100' : ''}`}
+              onClick={handleToggleLiveLocation}
+              aria-label="Lokasi"
+              title="Lokasi"
             >
-              7 Hari
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <circle cx="12" cy="12" r="8" />
+                <line x1="12" y1="2" x2="12" y2="5" />
+                <line x1="12" y1="19" x2="12" y2="22" />
+                <line x1="2" y1="12" x2="5" y2="12" />
+                <line x1="19" y1="12" x2="22" y2="12" />
+              </svg>
             </button>
             <button
               type="button"
-              className={`pill ${rangeDays === 30 ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
-              onClick={() => setRangeDays(30)}
+              className={`flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white/80 shadow-lg ${followMe ? 'bg-sky-400/30 text-sky-100' : ''}`}
+              onClick={handleToggleFollowMe}
+              aria-label="Ikuti saya"
+              title="Ikuti saya"
             >
-              30 Hari
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4L12 2z" />
+              </svg>
             </button>
           </div>
+          {locationStatus !== 'idle' ? (
+            <div className="absolute left-3 top-3 z-[999]">
+              {locationStatus === 'loading' ? (
+                <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/70 shadow-lg transition-all duration-300 ease-out">
+                  Lokasi memuat
+                </span>
+              ) : null}
+              {locationStatus === 'error' ? (
+                <span className="rounded-full border border-rose-400/30 bg-rose-400/20 px-3 py-1 text-[11px] font-semibold text-rose-100 shadow-lg transition-all duration-300 ease-out">
+                  Lokasi gagal
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <div className="soft-border rounded-2xl px-4 py-3">
+            <p className="text-xs text-white/60">Rekomendasi cepat</p>
+            {rankedWithDistance.length ? (
+              <div className="mt-2 space-y-2">
+                {rankedWithDistance.map((cell, index) => (
+                  <div key={`${cell.lat}-${cell.lng}`} className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-white">
+                        #{index + 1} • {cell.lat.toFixed(mapPrecision)}, {cell.lng.toFixed(mapPrecision)}
+                      </p>
+                      <p className="text-xs text-white/50">
+                        {useCurrentHour
+                          ? 'Sering order di jam ini'
+                          : `Padat dalam ${rangeDays} hari`} • {cell.count} riwayat
+                        {liveLocation && Number.isFinite(cell.distanceKm)
+                          ? ` • ${cell.distanceKm.toFixed(1)} km dari kamu`
+                          : ''}
+                      </p>
+                    </div>
+                    <span className="pill bg-white/10 text-white/70">{cell.count}x</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-white/50">
+                Belum ada data yang cukup untuk rekomendasi.
+              </p>
+            )}
+            {!liveLocation ? (
+              <p className="mt-2 text-xs text-white/50">
+                Aktifkan lokasi untuk lihat jarak ke spot.
+              </p>
+            ) : null}
+          </div>
+          <div className="soft-border rounded-2xl px-4 py-3">
+            <p className="text-xs text-white/60">Legend</p>
+            <div className="mt-3 h-2 w-full rounded-full bg-gradient-to-r from-[#ffd6a3] via-[#ff8a2b] to-[#4fe1c7]" />
+            <div className="mt-2 flex items-center justify-between text-[11px] text-white/50">
+              <span>Rendah</span>
+              <span>Tinggi</span>
+            </div>
+            <p className="mt-2 text-xs text-white/50">
+              Semakin terang, peluang order lebih tinggi.
+            </p>
+          </div>
+          <div className="soft-border rounded-2xl px-4 py-3">
+            <p className="text-xs text-white/60">Mode</p>
+            <p className="mt-2 text-sm text-white">
+              {heatmapGoal === 'order' ? 'Potensi Order' : 'Potensi Untung'}
+            </p>
+            <p className="mt-1 text-xs text-white/50">
+              {useCurrentHour ? `Bucket ${currentBucket.label}` : 'Semua jam'} • {rangeDays} hari
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
           <button
             type="button"
-            className={`pill ${useWeather ? 'bg-teal-400/20 text-teal-100' : 'bg-white/10 text-white/70'}`}
-            onClick={() => setUseWeather((prev) => !prev)}
+            className={`pill ${rangeDays === 7 ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
+            onClick={() => setRangeDays(7)}
           >
-            Cuaca {useWeather ? 'On' : 'Off'}
+            7 Hari
           </button>
           <button
             type="button"
-            className={`pill ${useHoliday ? 'bg-indigo-400/20 text-indigo-100' : 'bg-white/10 text-white/70'}`}
-            onClick={() => setUseHoliday((prev) => !prev)}
+            className={`pill ${rangeDays === 30 ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
+            onClick={() => setRangeDays(30)}
           >
-            Libur {useHoliday ? 'On' : 'Off'}
+            30 Hari
           </button>
-          <span className="pill bg-white/5 text-white/60">
-            Bucket {currentBucket.label}
-          </span>
         </div>
         <p className="mt-2 text-xs text-white/60">
-          {weatherSummary} • {holidaySummary} • Faktor waktu x{timeModifier.toFixed(2)}
+          {heatmapGoal === 'order'
+            ? `Mode potensi order • ${useCurrentHour ? `Bucket ${currentBucket.label}` : 'Semua jam'} • ${rangeDays} hari`
+            : `${weatherSummary} • ${holidaySummary} • Faktor waktu x${timeModifier.toFixed(2)}`}
         </p>
         {importState.status !== 'idle' ? (
           <p className="mt-2 text-xs text-white/60">

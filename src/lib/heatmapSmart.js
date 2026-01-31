@@ -2,6 +2,8 @@ const WEATHER_CACHE_MS = 20 * 60 * 1000
 const HOLIDAY_CACHE_MS = 7 * 24 * 60 * 60 * 1000
 const WEATHER_ENDPOINT = 'https://api.open-meteo.com/v1/forecast'
 const HOLIDAY_ENDPOINT = 'https://date.nager.at/api/v3/PublicHolidays'
+const DEFAULT_DEADHEAD_COST_PER_KM = 2000
+const DEFAULT_DEADHEAD_RADIUS_KM = 3
 
 export const TIME_BUCKETS = [
   { id: 0, label: '00-05', start: 0, end: 5 },
@@ -33,6 +35,121 @@ export const getJakartaHour = (date = new Date()) =>
 export const getTimeBucket = (hour) =>
   TIME_BUCKETS.find((bucket) => hour >= bucket.start && hour <= bucket.end) ||
   TIME_BUCKETS[0]
+
+export const getBucketHours = (bucket) => bucket.end - bucket.start + 1
+
+const parseDateSafe = (value) => {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed
+}
+
+export const buildIncomeBucketStats = ({ trips = [], earnings = [], expenses = [] }) => {
+  const stats = TIME_BUCKETS.map((bucket) => ({
+    net: 0,
+    count: 0,
+    hours: getBucketHours(bucket),
+    perHour: 0,
+  }))
+
+  const addValue = (value, when) => {
+    const parsed = parseDateSafe(when)
+    if (!parsed) return
+    const bucket = getTimeBucket(getJakartaHour(parsed))
+    const entry = stats[bucket.id]
+    entry.net += value
+    entry.count += 1
+  }
+
+  trips.forEach((trip) => {
+    const fare = Number(trip.fare || 0)
+    addValue(fare, trip.date)
+  })
+
+  earnings.forEach((item) => {
+    const amount = Number(item.amount || 0)
+    addValue(amount, item.date)
+  })
+
+  expenses.forEach((item) => {
+    const amount = Number(item.amount || 0)
+    addValue(-amount, item.date)
+  })
+
+  stats.forEach((entry) => {
+    entry.perHour = entry.hours ? entry.net / entry.hours : 0
+  })
+
+  return stats
+}
+
+export const getNetIncomeFactors = (bucketStats) => {
+  const active = bucketStats.filter((entry) => entry.count > 0 || entry.net !== 0)
+  const totalNet = active.reduce((sum, entry) => sum + entry.net, 0)
+  const totalHours = active.reduce((sum, entry) => sum + entry.hours, 0)
+  const overallPerHour = totalHours ? totalNet / totalHours : 0
+
+  return bucketStats.map((entry) => {
+    if (!overallPerHour) return 1
+    const perHour = Math.max(0, entry.perHour)
+    const factor = perHour / overallPerHour
+    return clamp(factor, 0.75, 1.35)
+  })
+}
+
+export const getOverallNetPerHour = (bucketStats) => {
+  const active = bucketStats.filter((entry) => entry.count > 0 || entry.net !== 0)
+  const totalNet = active.reduce((sum, entry) => sum + entry.net, 0)
+  const totalHours = active.reduce((sum, entry) => sum + entry.hours, 0)
+  return totalHours ? totalNet / totalHours : 0
+}
+
+const toRad = (value) => (value * Math.PI) / 180
+
+export const getDistanceKm = (start, end) => {
+  if (!start || !end) return 0
+  const lat1 = Number(start.lat)
+  const lng1 = Number(start.lng)
+  const lat2 = Number(end.lat)
+  const lng2 = Number(end.lng)
+  if (!Number.isFinite(lat1) || !Number.isFinite(lng1) || !Number.isFinite(lat2) || !Number.isFinite(lng2)) {
+    return 0
+  }
+  const radius = 6371
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return radius * c
+}
+
+export const getDeadheadPenalty = ({
+  point,
+  candidates = [],
+  radiusKm = DEFAULT_DEADHEAD_RADIUS_KM,
+  costPerKm = DEFAULT_DEADHEAD_COST_PER_KM,
+  netPerHour = 0,
+  fallbackNetPerHour = 20000,
+}) => {
+  if (!candidates.length) return 0.85
+  let nearest = Number.POSITIVE_INFINITY
+  candidates.forEach((candidate) => {
+    const distance = getDistanceKm(point, candidate)
+    if (!distance && candidates.length > 1) return
+    if (distance < nearest) nearest = distance
+  })
+
+  const effectiveDistance = Number.isFinite(nearest)
+    ? Math.min(nearest || radiusKm, radiusKm)
+    : radiusKm
+  const safeNetPerHour = netPerHour > 0 ? netPerHour : fallbackNetPerHour
+  const cost = effectiveDistance * costPerKm
+  return clamp(1 - cost / safeNetPerHour, 0.6, 1)
+}
 
 export const getConfidenceModifier = (count, target = 6) => {
   if (!count) return 0.2
