@@ -12,6 +12,11 @@ const normalizeRemote = (record) => ({
   sync_status: 'synced',
 })
 
+const stripLocalFields = (record) => {
+  const { sync_status, ...rest } = record
+  return rest
+}
+
 const pushPending = async (storeName, userId) => {
   const records = await listRecords(storeName, { includeDeleted: true })
   const pending = records.filter(
@@ -19,9 +24,10 @@ const pushPending = async (storeName, userId) => {
   )
   if (!pending.length) return 0
 
+  const payload = pending.map(stripLocalFields)
   const { error } = await supabase
     .from(storeName)
-    .upsert(pending, { onConflict: 'id' })
+    .upsert(payload, { onConflict: 'id' })
 
   if (error) {
     throw error

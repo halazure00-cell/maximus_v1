@@ -11,6 +11,7 @@ import { useAuth } from '../context/useAuth'
 import { useAlert } from '../context/useAlert'
 import StatCard from '../components/StatCard'
 import SectionCard from '../components/SectionCard'
+import SegmentedControl from '../components/SegmentedControl'
 import HeatmapLayer from '../components/HeatmapLayer'
 import {
   TIME_BUCKETS,
@@ -18,6 +19,7 @@ import {
   fetchHolidaySet,
   fetchWeather,
   getDeadheadPenalty,
+  getDistancePenalty,
   getConfidenceModifier,
   getJakartaDateKey,
   getJakartaHour,
@@ -57,7 +59,6 @@ const UserLocationLayer = ({ location, followMe }) => {
 const Dashboard = () => {
   const { user } = useAuth()
   const { showToast } = useAlert()
-  const { items: trips } = useEntityList('trips')
   const { items: earnings } = useEntityList('earnings')
   const { items: expenses } = useEntityList('expenses')
   const { items: heatmapPoints } = useEntityList('heatmap_points')
@@ -72,13 +73,11 @@ const Dashboard = () => {
   const [useCurrentHour, setUseCurrentHour] = useState(true)
   const [highContrastHeatmap, setHighContrastHeatmap] = useState(false)
   const [heatmapIntensity, setHeatmapIntensity] = useState(1)
+  const [distancePenaltyKm, setDistancePenaltyKm] = useState(3)
   const [liveLocation, setLiveLocation] = useState(null)
   const [liveLocationEnabled, setLiveLocationEnabled] = useState(false)
   const [locationStatus, setLocationStatus] = useState('idle')
   const [followMe, setFollowMe] = useState(false)
-  const [themeMode, setThemeMode] = useState('manual')
-  const [theme, setTheme] = useState('dark')
-  const [themeOpen, setThemeOpen] = useState(false)
   const locationWatchRef = useRef(null)
   const [weatherState, setWeatherState] = useState({ status: 'idle', data: null })
   const [holidayState, setHolidayState] = useState({ status: 'idle', dates: null })
@@ -98,12 +97,11 @@ const Dashboard = () => {
       setUseCurrentHour(settings.useCurrentHour ?? true)
       setHighContrastHeatmap(settings.highContrastHeatmap ?? false)
       setHeatmapIntensity(settings.heatmapIntensity ?? 1)
+      setDistancePenaltyKm(settings.distancePenaltyKm ?? 3)
       setLiveLocationEnabled(settings.liveLocationEnabled ?? false)
       setFollowMe(settings.followMe ?? false)
       setUseWeather(settings.useWeather ?? true)
       setUseHoliday(settings.useHoliday ?? true)
-      setThemeMode(settings.themeMode || 'manual')
-      setTheme(settings.theme === 'light' ? 'light' : 'dark')
     }
     const loadSettings = async () => {
       const settings = await getSettings()
@@ -174,23 +172,33 @@ const Dashboard = () => {
   }, [liveLocationEnabled, showToast])
 
   const summary = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10)
-    const todayTrips = trips.filter((trip) => trip.date?.startsWith(today))
-    const todayEarnings = earnings.filter((item) => item.date?.startsWith(today))
-    const todayExpenses = expenses.filter((item) => item.date?.startsWith(today))
+    const todayKey = new Date().toISOString().slice(0, 10)
+    const now = Date.now()
+    const weekCutoff = now - 7 * 24 * 60 * 60 * 1000
+    const inLastWeek = (value) => {
+      if (!value) return false
+      const parsed = new Date(value)
+      return !Number.isNaN(parsed.getTime()) && parsed.getTime() >= weekCutoff
+    }
 
-    const tripCount = todayTrips.length
-    const totalIncome = todayEarnings.reduce((sum, item) => sum + (item.amount || 0), 0)
-    const tripIncome = todayTrips.reduce((sum, item) => sum + (item.fare || 0), 0)
-    const totalExpense = todayExpenses.reduce((sum, item) => sum + (item.amount || 0), 0)
+    const todayEarnings = earnings.filter((item) => item.date?.startsWith(todayKey))
+    const todayExpenses = expenses.filter((item) => item.date?.startsWith(todayKey))
+    const weekEarnings = earnings.filter((item) => inLastWeek(item.date))
+    const weekExpenses = expenses.filter((item) => inLastWeek(item.date))
+
+    const totalIncomeToday = todayEarnings.reduce((sum, item) => sum + (item.amount || 0), 0)
+    const totalExpenseToday = todayExpenses.reduce((sum, item) => sum + (item.amount || 0), 0)
+    const totalIncomeWeek = weekEarnings.reduce((sum, item) => sum + (item.amount || 0), 0)
+    const totalExpenseWeek = weekExpenses.reduce((sum, item) => sum + (item.amount || 0), 0)
 
     return {
-      tripCount,
-      totalIncome: totalIncome + tripIncome,
-      totalExpense,
-      net: totalIncome + tripIncome - totalExpense,
+      totalIncomeToday,
+      totalExpenseToday,
+      netToday: totalIncomeToday - totalExpenseToday,
+      totalIncomeWeek,
+      totalExpenseWeek,
     }
-  }, [trips, earnings, expenses])
+  }, [earnings, expenses])
 
   const filteredHeatmapPoints = useMemo(() => {
     const cutoff = Date.now() - rangeDays * 24 * 60 * 60 * 1000
@@ -297,8 +305,8 @@ const Dashboard = () => {
   }, [filteredHeatmapPoints])
 
   const incomeStats = useMemo(
-    () => buildIncomeBucketStats({ trips, earnings, expenses }),
-    [trips, earnings, expenses]
+    () => buildIncomeBucketStats({ earnings, expenses }),
+    [earnings, expenses]
   )
 
   const incomeFactors = useMemo(() => getNetIncomeFactors(incomeStats), [incomeStats])
@@ -415,6 +423,12 @@ const Dashboard = () => {
       const avgDeadhead = cell.deadheadSum / cell.count
       const confidence = getConfidenceModifier(cell.count)
       const effectiveTimeModifier = heatmapGoal === 'order' ? 1 : timeModifier
+      const distanceKm = liveLocation
+        ? getDistanceKm({ lat: liveLocation.lat, lng: liveLocation.lng }, { lat: cell.lat, lng: cell.lng })
+        : null
+      const distancePenalty = liveLocation
+        ? getDistancePenalty({ distanceKm, radiusKm: distancePenaltyKm })
+        : 1
       const score =
         avgIntensity *
         avgIncome *
@@ -422,8 +436,9 @@ const Dashboard = () => {
         effectiveTimeModifier *
         weatherModifier *
         holidayModifier *
-        confidence
-      return { ...cell, score }
+        confidence *
+        distancePenalty
+      return { ...cell, score, distanceKm }
     })
 
     const maxScore = Math.max(...scored.map((cell) => cell.score), 0)
@@ -451,18 +466,11 @@ const Dashboard = () => {
     timeModifier,
     weatherModifier,
     holidayModifier,
+    liveLocation,
+    distancePenaltyKm,
   ])
 
-  const rankedWithDistance = useMemo(() => {
-    if (!liveLocation) return heatmapData.ranked
-    return heatmapData.ranked.map((cell) => {
-      const distanceKm = getDistanceKm(
-        { lat: liveLocation.lat, lng: liveLocation.lng },
-        { lat: cell.lat, lng: cell.lng }
-      )
-      return { ...cell, distanceKm }
-    })
-  }, [heatmapData.ranked, liveLocation])
+  const rankedWithDistance = useMemo(() => heatmapData.ranked, [heatmapData.ranked])
 
   const updateSettings = async (values) => {
     try {
@@ -488,16 +496,29 @@ const Dashboard = () => {
     await updateSettings({ followMe: nextFollow, liveLocationEnabled: nextEnabled })
   }
 
-  const handleThemeModeChange = async (nextMode) => {
-    const mode = nextMode === 'system' || nextMode === 'schedule' ? nextMode : 'manual'
-    setThemeMode(mode)
-    await updateSettings({ themeMode: mode })
+  const handleHeatmapGoalChange = async (goal) => {
+    const nextGoal = goal === 'economy' ? 'economy' : 'order'
+    setHeatmapGoal(nextGoal)
+    await updateSettings({ heatmapGoal: nextGoal })
   }
 
-  const handleThemeChange = async (nextTheme) => {
-    const modeTheme = nextTheme === 'light' ? 'light' : 'dark'
-    setTheme(modeTheme)
-    await updateSettings({ theme: modeTheme })
+  const handleWeatherToggle = async (enabled) => {
+    const next = Boolean(enabled)
+    setUseWeather(next)
+    await updateSettings({ useWeather: next })
+  }
+
+  const handleCurrentHourToggle = async (enabled) => {
+    const next = Boolean(enabled)
+    setUseCurrentHour(next)
+    await updateSettings({ useCurrentHour: next })
+  }
+
+  const handleDistancePenaltyChange = async (value) => {
+    const next = Number(value)
+    const safe = Number.isFinite(next) && next > 0 ? next : 3
+    setDistancePenaltyKm(safe)
+    await updateSettings({ distancePenaltyKm: safe })
   }
 
   const handleImportFile = async (event) => {
@@ -623,109 +644,34 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6">
-      <div className="glass rounded-3xl p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="section-title">Aksi Cepat</h2>
-          <div className="flex items-center gap-2">
-            <span className="pill bg-white/10 text-[11px] text-white/70">1 Tap</span>
-            <div className="relative">
-              <button
-                type="button"
-                className="btn-ghost px-3 py-1 text-[11px]"
-                onClick={() => setThemeOpen((prev) => !prev)}
-                aria-expanded={themeOpen}
-              >
-                Tema
-              </button>
-              {themeOpen ? (
-                <div className="absolute right-0 z-20 mt-2 w-56 rounded-2xl border border-white/10 bg-night-950/95 p-3 shadow-xl">
-                  <p className="text-xs font-semibold text-white/80">Mode Tema</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${themeMode === 'manual' ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
-                      onClick={() => handleThemeModeChange('manual')}
-                    >
-                      Manual
-                    </button>
-                    <button
-                      type="button"
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${themeMode === 'system' ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
-                      onClick={() => handleThemeModeChange('system')}
-                    >
-                      Ikuti Sistem
-                    </button>
-                    <button
-                      type="button"
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${themeMode === 'schedule' ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
-                      onClick={() => handleThemeModeChange('schedule')}
-                    >
-                      Ikut Jam
-                    </button>
-                  </div>
-                  {themeMode === 'manual' ? (
-                    <div className="mt-3">
-                      <p className="text-xs text-white/60">Pilih tema</p>
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          type="button"
-                          className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${theme === 'light' ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
-                          onClick={() => handleThemeChange('light')}
-                        >
-                          Cerah
-                        </button>
-                        <button
-                          type="button"
-                          className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${theme === 'dark' ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
-                          onClick={() => handleThemeChange('dark')}
-                        >
-                          Gelap
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-[11px] text-white/60">
-                      {themeMode === 'system'
-                        ? 'Mengikuti preferensi sistem.'
-                        : 'Cerah 06:00-17:59, gelap 18:00-05:59.'}
-                    </p>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <Link to="/perjalanan" className="btn-primary">
-            Catat Trip
-          </Link>
-          <Link to="/pendapatan" className="btn-outline">
-            Tambah Pendapatan
-          </Link>
-          <Link to="/pengeluaran" className="btn-outline">
-            Tambah Pengeluaran
-          </Link>
-        </div>
-      </div>
-
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard
-          title="Trip Hari Ini"
-          value={summary.tripCount}
-          caption="Jumlah perjalanan tercatat"
-        />
-        <StatCard
-          title="Pendapatan"
-          value={formatCurrency(summary.totalIncome)}
-          caption="Total pemasukan hari ini"
+          title="Pemasukan Hari Ini"
+          value={formatCurrency(summary.totalIncomeToday)}
+          caption={`7 hari: ${formatCurrency(summary.totalIncomeWeek)}`}
           accent="text-sunrise-300"
         />
         <StatCard
-          title="Neto"
-          value={formatCurrency(summary.net)}
+          title="Pengeluaran Hari Ini"
+          value={formatCurrency(summary.totalExpenseToday)}
+          caption={`7 hari: ${formatCurrency(summary.totalExpenseWeek)}`}
+          accent="text-rose-200"
+        />
+        <StatCard
+          title="Neto Hari Ini"
+          value={formatCurrency(summary.netToday)}
           caption="Setelah pengeluaran"
           accent="text-teal-200"
         />
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <Link to="/catat?tab=income" className="btn-primary">
+          + Pemasukan
+        </Link>
+        <Link to="/catat?tab=expense" className="btn-outline">
+          + Pengeluaran
+        </Link>
       </div>
 
       <SectionCard
@@ -750,7 +696,7 @@ const Dashboard = () => {
           className="hidden"
           onChange={handleImportFile}
         />
-        <div className="relative isolate z-0 h-72 overflow-hidden rounded-2xl border border-white/10">
+        <div className="relative isolate z-0 h-80 overflow-hidden rounded-2xl border border-white/10">
           <MapContainer
             center={mapCenter}
             zoom={12}
@@ -763,6 +709,73 @@ const Dashboard = () => {
             <UserLocationLayer location={liveLocation} followMe={followMe} />
             <HeatmapLayer points={heatmapData.points} highContrast={highContrastHeatmap} />
           </MapContainer>
+          <div className="absolute left-3 top-3 z-10 flex flex-wrap gap-2">
+            {!liveLocationEnabled ? (
+              <span className="pill bg-white/10 text-white/70">Lokasi off</span>
+            ) : null}
+            {!useWeather ? (
+              <span className="pill bg-white/10 text-white/70">Cuaca off</span>
+            ) : null}
+            <span className="pill bg-white/10 text-white/70">
+              {useCurrentHour ? 'Sekarang' : 'Bebas'}
+            </span>
+            <span className="pill bg-white/10 text-white/70">
+              {rangeDays} hari
+            </span>
+          </div>
+          <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-2">
+            <SegmentedControl
+              options={[
+                { value: 'order', label: 'Order' },
+                { value: 'economy', label: 'Untung' },
+              ]}
+              value={heatmapGoal}
+              onChange={handleHeatmapGoalChange}
+              size="sm"
+            />
+            <SegmentedControl
+              options={[
+                { value: 'current', label: 'Sekarang' },
+                { value: 'all', label: 'Bebas' },
+              ]}
+              value={useCurrentHour ? 'current' : 'all'}
+              onChange={(value) => handleCurrentHourToggle(value === 'current')}
+              size="sm"
+            />
+            <SegmentedControl
+              options={[
+                { value: 'on', label: 'Cuaca On' },
+                { value: 'off', label: 'Cuaca Off' },
+              ]}
+              value={useWeather ? 'on' : 'off'}
+              onChange={(value) => handleWeatherToggle(value === 'on')}
+              size="sm"
+            />
+            <SegmentedControl
+              options={[
+                { value: 7, label: '7 Hari' },
+                { value: 30, label: '30 Hari' },
+              ]}
+              value={rangeDays}
+              onChange={setRangeDays}
+              size="sm"
+            />
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+              <div className="flex items-center justify-between text-xs text-white/70">
+                <span>Radius</span>
+                <span>{Number(distancePenaltyKm).toFixed(1)} km</span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="6"
+                step="0.5"
+                value={distancePenaltyKm}
+                onChange={(event) => handleDistancePenaltyChange(event.target.value)}
+                className="mt-2 w-full"
+              />
+            </div>
+          </div>
           <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-2">
             <button
               type="button"
@@ -809,7 +822,7 @@ const Dashboard = () => {
             </button>
           </div>
           {locationStatus !== 'idle' ? (
-            <div className="absolute left-3 top-3 z-[999]">
+            <div className="absolute right-3 top-3 z-[999]">
               {locationStatus === 'loading' ? (
                 <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/70 shadow-lg transition-all duration-300 ease-out">
                   Lokasi memuat
@@ -866,7 +879,7 @@ const Dashboard = () => {
               <span>Tinggi</span>
             </div>
             <p className="mt-2 text-xs text-white/50">
-              Semakin terang, peluang order lebih tinggi.
+              Semakin terang, potensi lebih tinggi.
             </p>
           </div>
           <div className="soft-border rounded-2xl px-4 py-3">
@@ -879,26 +892,10 @@ const Dashboard = () => {
             </p>
           </div>
         </div>
-        <div className="mt-3 flex items-center gap-2">
-          <button
-            type="button"
-            className={`pill ${rangeDays === 7 ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
-            onClick={() => setRangeDays(7)}
-          >
-            7 Hari
-          </button>
-          <button
-            type="button"
-            className={`pill ${rangeDays === 30 ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
-            onClick={() => setRangeDays(30)}
-          >
-            30 Hari
-          </button>
-        </div>
         <p className="mt-2 text-xs text-white/60">
           {heatmapGoal === 'order'
-            ? `Mode potensi order • ${useCurrentHour ? `Bucket ${currentBucket.label}` : 'Semua jam'} • ${rangeDays} hari`
-            : `${weatherSummary} • ${holidaySummary} • Faktor waktu x${timeModifier.toFixed(2)}`}
+            ? `Filter: ${useCurrentHour ? `Bucket ${currentBucket.label}` : 'Semua jam'} • ${rangeDays} hari • Radius ${Number(distancePenaltyKm).toFixed(1)} km`
+            : `${weatherSummary} • ${holidaySummary} • Radius ${Number(distancePenaltyKm).toFixed(1)} km`}
         </p>
         {importState.status !== 'idle' ? (
           <p className="mt-2 text-xs text-white/60">

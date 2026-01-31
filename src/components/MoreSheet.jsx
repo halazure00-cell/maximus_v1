@@ -1,8 +1,6 @@
 import { NavLink } from 'react-router-dom'
 
 const moreItems = [
-  { to: '/jadwal', label: 'Jadwal' },
-  { to: '/catatan', label: 'Catatan' },
   { to: '/pengaturan', label: 'Pengaturan' },
 ]
 

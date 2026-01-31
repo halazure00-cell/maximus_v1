@@ -1,9 +1,6 @@
 export const ENTITY_STORES = [
-  'trips',
   'earnings',
   'expenses',
-  'schedule',
-  'notes',
   'heatmap_points',
   'settings',
 ]
@@ -19,6 +16,7 @@ export const DEFAULT_SETTINGS = {
   useCurrentHour: true,
   highContrastHeatmap: false,
   heatmapIntensity: 1,
+  distancePenaltyKm: 3,
   liveLocationEnabled: false,
   followMe: false,
   useWeather: true,

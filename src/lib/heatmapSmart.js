@@ -45,7 +45,7 @@ const parseDateSafe = (value) => {
   return parsed
 }
 
-export const buildIncomeBucketStats = ({ trips = [], earnings = [], expenses = [] }) => {
+export const buildIncomeBucketStats = ({ earnings = [], expenses = [] }) => {
   const stats = TIME_BUCKETS.map((bucket) => ({
     net: 0,
     count: 0,
@@ -61,11 +61,6 @@ export const buildIncomeBucketStats = ({ trips = [], earnings = [], expenses = [
     entry.net += value
     entry.count += 1
   }
-
-  trips.forEach((trip) => {
-    const fare = Number(trip.fare || 0)
-    addValue(fare, trip.date)
-  })
 
   earnings.forEach((item) => {
     const amount = Number(item.amount || 0)
@@ -149,6 +144,17 @@ export const getDeadheadPenalty = ({
   const safeNetPerHour = netPerHour > 0 ? netPerHour : fallbackNetPerHour
   const cost = effectiveDistance * costPerKm
   return clamp(1 - cost / safeNetPerHour, 0.6, 1)
+}
+
+export const getDistancePenalty = ({ distanceKm, radiusKm = DEFAULT_DEADHEAD_RADIUS_KM }) => {
+  const safeRadius = Number.isFinite(Number(radiusKm)) && Number(radiusKm) > 0
+    ? Number(radiusKm)
+    : DEFAULT_DEADHEAD_RADIUS_KM
+  const safeDistance = Number.isFinite(Number(distanceKm)) ? Number(distanceKm) : 0
+  if (!safeDistance) return 1
+  const normalized = safeDistance / safeRadius
+  const penalty = Math.exp(-normalized * 0.55)
+  return clamp(penalty, 0.55, 1)
 }
 
 export const getConfidenceModifier = (count, target = 6) => {

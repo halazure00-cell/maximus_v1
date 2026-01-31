@@ -4,9 +4,7 @@ import { useSync } from '../context/useSync'
 
 const navItems = [
   { to: '/', label: 'Dasbor' },
-  { to: '/perjalanan', label: 'Trip' },
-  { to: '/pendapatan', label: 'Pendapatan' },
-  { to: '/pengeluaran', label: 'Pengeluaran' },
+  { to: '/catat', label: 'Catat' },
 ]
 
 const Header = ({ onOpenMore }) => {

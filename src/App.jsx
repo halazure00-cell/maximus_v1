@@ -7,11 +7,7 @@ import { getSettings } from './lib/localStore'
 import { subscribe } from './lib/events'
 import Auth from './pages/Auth'
 import Dashboard from './pages/Dashboard'
-import Trips from './pages/Trips'
-import Earnings from './pages/Earnings'
-import Expenses from './pages/Expenses'
-import Schedule from './pages/Schedule'
-import Notes from './pages/Notes'
+import Finance from './pages/Finance'
 import Settings from './pages/Settings'
 
 const RequireAuth = ({ children }) => {
@@ -133,11 +129,7 @@ const App = () => (
         }
       >
         <Route index element={<Dashboard />} />
-        <Route path="perjalanan" element={<Trips />} />
-        <Route path="pendapatan" element={<Earnings />} />
-        <Route path="pengeluaran" element={<Expenses />} />
-        <Route path="jadwal" element={<Schedule />} />
-        <Route path="catatan" element={<Notes />} />
+        <Route path="catat" element={<Finance />} />
         <Route path="pengaturan" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

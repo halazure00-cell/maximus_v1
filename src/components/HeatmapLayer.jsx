@@ -3,12 +3,38 @@ import { useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet.heat'
 
+const patchSimpleHeatContext = () => {
+  if (typeof window === 'undefined') return
+  const { simpleheat } = window
+  if (!simpleheat || simpleheat.__willReadFrequently) return
+
+  const patched = function (input) {
+    const canvas = typeof input === 'string' ? document.getElementById(input) : input
+    if (canvas && !canvas.__heatmapGetContextPatched && typeof canvas.getContext === 'function') {
+      const originalGetContext = canvas.getContext.bind(canvas)
+      canvas.getContext = (type, options) => {
+        if (type === '2d' && !options) {
+          return originalGetContext(type, { willReadFrequently: true })
+        }
+        return originalGetContext(type, options)
+      }
+      canvas.__heatmapGetContextPatched = true
+    }
+    return simpleheat.call(this, input)
+  }
+
+  patched.__willReadFrequently = true
+  patched.prototype = simpleheat.prototype
+  window.simpleheat = patched
+}
+
 const HeatmapLayer = ({ points = [], highContrast = false }) => {
   const map = useMap()
   const layerRef = useRef(null)
 
   useEffect(() => {
     if (!map) return undefined
+    patchSimpleHeatContext()
     if (layerRef.current) {
       layerRef.current.remove()
       layerRef.current = null
