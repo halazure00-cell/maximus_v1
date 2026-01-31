@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { syncAll } from '../lib/syncEngine'
 import { getSettings } from '../lib/localStore'
 import { useAuth } from './useAuth'
-import SyncContext from './syncContext'
+import SyncContext from './SyncContext'
 
 export const SyncProvider = ({ children }) => {
   const { user } = useAuth()

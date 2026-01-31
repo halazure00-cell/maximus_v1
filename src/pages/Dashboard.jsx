@@ -76,6 +76,9 @@ const Dashboard = () => {
   const [liveLocationEnabled, setLiveLocationEnabled] = useState(false)
   const [locationStatus, setLocationStatus] = useState('idle')
   const [followMe, setFollowMe] = useState(false)
+  const [themeMode, setThemeMode] = useState('manual')
+  const [theme, setTheme] = useState('dark')
+  const [themeOpen, setThemeOpen] = useState(false)
   const locationWatchRef = useRef(null)
   const [weatherState, setWeatherState] = useState({ status: 'idle', data: null })
   const [holidayState, setHolidayState] = useState({ status: 'idle', dates: null })
@@ -99,6 +102,8 @@ const Dashboard = () => {
       setFollowMe(settings.followMe ?? false)
       setUseWeather(settings.useWeather ?? true)
       setUseHoliday(settings.useHoliday ?? true)
+      setThemeMode(settings.themeMode || 'manual')
+      setTheme(settings.theme === 'light' ? 'light' : 'dark')
     }
     const loadSettings = async () => {
       const settings = await getSettings()
@@ -483,6 +488,18 @@ const Dashboard = () => {
     await updateSettings({ followMe: nextFollow, liveLocationEnabled: nextEnabled })
   }
 
+  const handleThemeModeChange = async (nextMode) => {
+    const mode = nextMode === 'system' || nextMode === 'schedule' ? nextMode : 'manual'
+    setThemeMode(mode)
+    await updateSettings({ themeMode: mode })
+  }
+
+  const handleThemeChange = async (nextTheme) => {
+    const modeTheme = nextTheme === 'light' ? 'light' : 'dark'
+    setTheme(modeTheme)
+    await updateSettings({ theme: modeTheme })
+  }
+
   const handleImportFile = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
@@ -609,7 +626,74 @@ const Dashboard = () => {
       <div className="glass rounded-3xl p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="section-title">Aksi Cepat</h2>
-          <span className="pill bg-white/10 text-[11px] text-white/70">1 Tap</span>
+          <div className="flex items-center gap-2">
+            <span className="pill bg-white/10 text-[11px] text-white/70">1 Tap</span>
+            <div className="relative">
+              <button
+                type="button"
+                className="btn-ghost px-3 py-1 text-[11px]"
+                onClick={() => setThemeOpen((prev) => !prev)}
+                aria-expanded={themeOpen}
+              >
+                Tema
+              </button>
+              {themeOpen ? (
+                <div className="absolute right-0 z-20 mt-2 w-56 rounded-2xl border border-white/10 bg-night-950/95 p-3 shadow-xl">
+                  <p className="text-xs font-semibold text-white/80">Mode Tema</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${themeMode === 'manual' ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
+                      onClick={() => handleThemeModeChange('manual')}
+                    >
+                      Manual
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${themeMode === 'system' ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
+                      onClick={() => handleThemeModeChange('system')}
+                    >
+                      Ikuti Sistem
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${themeMode === 'schedule' ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
+                      onClick={() => handleThemeModeChange('schedule')}
+                    >
+                      Ikut Jam
+                    </button>
+                  </div>
+                  {themeMode === 'manual' ? (
+                    <div className="mt-3">
+                      <p className="text-xs text-white/60">Pilih tema</p>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${theme === 'light' ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
+                          onClick={() => handleThemeChange('light')}
+                        >
+                          Cerah
+                        </button>
+                        <button
+                          type="button"
+                          className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${theme === 'dark' ? 'bg-sunrise-300/20 text-sunrise-100' : 'bg-white/10 text-white/70'}`}
+                          onClick={() => handleThemeChange('dark')}
+                        >
+                          Gelap
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-[11px] text-white/60">
+                      {themeMode === 'system'
+                        ? 'Mengikuti preferensi sistem.'
+                        : 'Cerah 06:00-17:59, gelap 18:00-05:59.'}
+                    </p>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <Link to="/perjalanan" className="btn-primary">

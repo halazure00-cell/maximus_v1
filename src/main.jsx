@@ -5,9 +5,9 @@ import { registerSW } from 'virtual:pwa-register'
 import 'leaflet/dist/leaflet.css'
 import './index.css'
 import App from './App.jsx'
-import { AuthProvider } from './context/AuthContext'
-import { SyncProvider } from './context/SyncContext'
-import { AlertProvider } from './context/AlertContext'
+import { AuthProvider } from './context/AuthContext.jsx'
+import { SyncProvider } from './context/SyncContext.jsx'
+import { AlertProvider } from './context/AlertContext.jsx'
 
 registerSW({ immediate: true })
 

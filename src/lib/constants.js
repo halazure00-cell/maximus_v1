@@ -10,6 +10,8 @@ export const ENTITY_STORES = [
 
 export const DEFAULT_SETTINGS = {
   id: 'app',
+  themeMode: 'manual',
+  theme: 'dark',
   mapPrecision: 4,
   deadheadCostPerKm: 2000,
   deadheadRadiusKm: 3,

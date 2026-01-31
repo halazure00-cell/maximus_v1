@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import ToastStack from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
-import AlertContext from './alertContext'
+import AlertContext from './AlertContext'
 
 const createId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {

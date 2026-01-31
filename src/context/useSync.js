@@ -1,5 +1,5 @@
 import { useContext } from 'react'
-import SyncContext from './syncContext'
+import SyncContext from './SyncContext'
 
 export const useSync = () => {
   const context = useContext(SyncContext)
