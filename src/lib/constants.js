@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = {
   highContrastHeatmap: false,
   heatmapIntensity: 1,
   distancePenaltyKm: 3,
+  heatmapControlsOpen: true,
   liveLocationEnabled: false,
   followMe: false,
   useWeather: true,

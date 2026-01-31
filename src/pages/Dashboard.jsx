@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet'
 import { useEntityList } from '../lib/hooks/useEntityList'
@@ -63,6 +63,7 @@ const Dashboard = () => {
   const { items: expenses } = useEntityList('expenses')
   const { items: heatmapPoints } = useEntityList('heatmap_points')
   const fileInputRef = useRef(null)
+  const controlsTimerRef = useRef(null)
   const [rangeDays, setRangeDays] = useState(7)
   const [useWeather, setUseWeather] = useState(true)
   const [useHoliday, setUseHoliday] = useState(true)
@@ -78,6 +79,7 @@ const Dashboard = () => {
   const [liveLocationEnabled, setLiveLocationEnabled] = useState(false)
   const [locationStatus, setLocationStatus] = useState('idle')
   const [followMe, setFollowMe] = useState(false)
+  const [controlsOpen, setControlsOpen] = useState(true)
   const locationWatchRef = useRef(null)
   const [weatherState, setWeatherState] = useState({ status: 'idle', data: null })
   const [holidayState, setHolidayState] = useState({ status: 'idle', dates: null })
@@ -98,6 +100,7 @@ const Dashboard = () => {
       setHighContrastHeatmap(settings.highContrastHeatmap ?? false)
       setHeatmapIntensity(settings.heatmapIntensity ?? 1)
       setDistancePenaltyKm(settings.distancePenaltyKm ?? 3)
+      setControlsOpen(settings.heatmapControlsOpen ?? true)
       setLiveLocationEnabled(settings.liveLocationEnabled ?? false)
       setFollowMe(settings.followMe ?? false)
       setUseWeather(settings.useWeather ?? true)
@@ -480,6 +483,37 @@ const Dashboard = () => {
     }
   }
 
+  const clearControlsTimer = useCallback(() => {
+    if (controlsTimerRef.current) {
+      clearTimeout(controlsTimerRef.current)
+    }
+    controlsTimerRef.current = null
+  }, [])
+
+  const resetControlsTimer = useCallback(() => {
+    if (!controlsOpen) return
+    clearControlsTimer()
+    controlsTimerRef.current = setTimeout(() => {
+      setControlsOpen(false)
+      updateSettings({ heatmapControlsOpen: false })
+    }, 6000)
+  }, [clearControlsTimer, controlsOpen, updateSettings])
+
+  useEffect(() => {
+    if (controlsOpen) {
+      resetControlsTimer()
+    } else {
+      clearControlsTimer()
+    }
+    return clearControlsTimer
+  }, [controlsOpen, resetControlsTimer, clearControlsTimer])
+
+  const handleControlsToggle = async () => {
+    const nextOpen = !controlsOpen
+    setControlsOpen(nextOpen)
+    await updateSettings({ heatmapControlsOpen: nextOpen })
+  }
+
   const handleToggleLiveLocation = async () => {
     const nextEnabled = !liveLocationEnabled
     const nextFollow = nextEnabled ? followMe : false
@@ -674,21 +708,7 @@ const Dashboard = () => {
         </Link>
       </div>
 
-      <SectionCard
-        title="Peta Panas Perjalanan"
-        action={(
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="btn-outline px-3 py-1 text-xs"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              Import Riwayat
-            </button>
-            <span className="pill bg-white/10 text-white/70">Bandung</span>
-          </div>
-        )}
-      >
+      <SectionCard title="Peta Panas">
         <input
           ref={fileInputRef}
           type="file"
@@ -696,7 +716,11 @@ const Dashboard = () => {
           className="hidden"
           onChange={handleImportFile}
         />
-        <div className="relative isolate z-0 h-80 overflow-hidden rounded-2xl border border-white/10">
+        <div
+          className="relative isolate z-0 h-80 overflow-hidden rounded-2xl border border-white/10"
+          onPointerDown={resetControlsTimer}
+          onTouchStart={resetControlsTimer}
+        >
           <MapContainer
             center={mapCenter}
             zoom={12}
@@ -709,77 +733,96 @@ const Dashboard = () => {
             <UserLocationLayer location={liveLocation} followMe={followMe} />
             <HeatmapLayer points={heatmapData.points} highContrast={highContrastHeatmap} />
           </MapContainer>
-          <div className="absolute left-3 top-3 z-10 flex flex-wrap gap-2">
-            {!liveLocationEnabled ? (
-              <span className="pill bg-white/10 text-white/70">Lokasi off</span>
-            ) : null}
-            {!useWeather ? (
-              <span className="pill bg-white/10 text-white/70">Cuaca off</span>
-            ) : null}
-            <span className="pill bg-white/10 text-white/70">
-              {useCurrentHour ? 'Sekarang' : 'Bebas'}
-            </span>
-            <span className="pill bg-white/10 text-white/70">
-              {rangeDays} hari
-            </span>
-          </div>
-          <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-2">
-            <SegmentedControl
-              options={[
-                { value: 'order', label: 'Order' },
-                { value: 'economy', label: 'Untung' },
-              ]}
-              value={heatmapGoal}
-              onChange={handleHeatmapGoalChange}
-              size="sm"
-            />
-            <SegmentedControl
-              options={[
-                { value: 'current', label: 'Sekarang' },
-                { value: 'all', label: 'Bebas' },
-              ]}
-              value={useCurrentHour ? 'current' : 'all'}
-              onChange={(value) => handleCurrentHourToggle(value === 'current')}
-              size="sm"
-            />
-            <SegmentedControl
-              options={[
-                { value: 'on', label: 'Cuaca On' },
-                { value: 'off', label: 'Cuaca Off' },
-              ]}
-              value={useWeather ? 'on' : 'off'}
-              onChange={(value) => handleWeatherToggle(value === 'on')}
-              size="sm"
-            />
-            <SegmentedControl
-              options={[
-                { value: 7, label: '7 Hari' },
-                { value: 30, label: '30 Hari' },
-              ]}
-              value={rangeDays}
-              onChange={setRangeDays}
-              size="sm"
-            />
-            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
-              <div className="flex items-center justify-between text-xs text-white/70">
-                <span>Radius</span>
-                <span>{Number(distancePenaltyKm).toFixed(1)} km</span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max="6"
-                step="0.5"
-                value={distancePenaltyKm}
-                onChange={(event) => handleDistancePenaltyChange(event.target.value)}
-                className="mt-2 w-full"
-              />
+          <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between">
+            <div className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/80 shadow-lg">
+              Peta Panas
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/80 shadow-lg"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Import
+              </button>
+              <span className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/70 shadow-lg">
+                Bandung
+              </span>
             </div>
           </div>
-          <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-2">
+          <div className="absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2">
             <button
               type="button"
-              className={`flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white/80 shadow-lg ${liveLocationEnabled ? 'bg-sky-400/30 text-sky-100' : ''}`}
+              onClick={handleControlsToggle}
+              className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/80 shadow-lg"
+              aria-expanded={controlsOpen}
+            >
+              {controlsOpen ? 'Sembunyikan' : 'Tampilkan'} Kontrol
+            </button>
+            {controlsOpen ? (
+              <div
+                className="w-48 space-y-2 rounded-3xl border border-white/10 bg-night-950/95 p-3 shadow-lg"
+                onPointerDown={resetControlsTimer}
+                onKeyDown={resetControlsTimer}
+              >
+                <SegmentedControl
+                  options={[
+                    { value: 'order', label: 'Order' },
+                    { value: 'economy', label: 'Untung' },
+                  ]}
+                  value={heatmapGoal}
+                  onChange={handleHeatmapGoalChange}
+                  size="sm"
+                />
+                <SegmentedControl
+                  options={[
+                    { value: 'current', label: 'Sekarang' },
+                    { value: 'all', label: 'Bebas' },
+                  ]}
+                  value={useCurrentHour ? 'current' : 'all'}
+                  onChange={(value) => handleCurrentHourToggle(value === 'current')}
+                  size="sm"
+                />
+                <SegmentedControl
+                  options={[
+                    { value: 'on', label: 'Cuaca On' },
+                    { value: 'off', label: 'Cuaca Off' },
+                  ]}
+                  value={useWeather ? 'on' : 'off'}
+                  onChange={(value) => handleWeatherToggle(value === 'on')}
+                  size="sm"
+                />
+                <SegmentedControl
+                  options={[
+                    { value: 7, label: '7 Hari' },
+                    { value: 30, label: '30 Hari' },
+                  ]}
+                  value={rangeDays}
+                  onChange={setRangeDays}
+                  size="sm"
+                />
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+                  <div className="flex items-center justify-between text-[11px] text-white/70">
+                    <span>Radius</span>
+                    <span>{Number(distancePenaltyKm).toFixed(1)} km</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="6"
+                    step="0.5"
+                    value={distancePenaltyKm}
+                    onChange={(event) => handleDistancePenaltyChange(event.target.value)}
+                    className="mt-2 w-full"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <div className="absolute right-3 top-24 z-10 flex flex-col gap-2">
+            <button
+              type="button"
+              className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-night-950/95 text-white/80 shadow-lg ${liveLocationEnabled ? 'bg-sky-400/30 text-sky-100' : ''}`}
               onClick={handleToggleLiveLocation}
               aria-label="Lokasi"
               title="Lokasi"
@@ -803,7 +846,7 @@ const Dashboard = () => {
             </button>
             <button
               type="button"
-              className={`flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white/80 shadow-lg ${followMe ? 'bg-sky-400/30 text-sky-100' : ''}`}
+              className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-night-950/95 text-white/80 shadow-lg ${followMe ? 'bg-sky-400/30 text-sky-100' : ''}`}
               onClick={handleToggleFollowMe}
               aria-label="Ikuti saya"
               title="Ikuti saya"
@@ -822,7 +865,7 @@ const Dashboard = () => {
             </button>
           </div>
           {locationStatus !== 'idle' ? (
-            <div className="absolute right-3 top-3 z-[999]">
+            <div className="absolute right-3 top-16 z-[999]">
               {locationStatus === 'loading' ? (
                 <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/70 shadow-lg transition-all duration-300 ease-out">
                   Lokasi memuat
@@ -835,6 +878,14 @@ const Dashboard = () => {
               ) : null}
             </div>
           ) : null}
+          <div className="absolute bottom-3 left-3 z-10 rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 shadow-lg">
+            <p className="text-[11px] text-white/60">Legend</p>
+            <div className="mt-2 h-2 w-24 rounded-full bg-gradient-to-r from-[#ffd6a3] via-[#ff8a2b] to-[#4fe1c7]" />
+            <div className="mt-1 flex items-center justify-between text-[10px] text-white/50">
+              <span>Rendah</span>
+              <span>Tinggi</span>
+            </div>
+          </div>
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
           <div className="soft-border rounded-2xl px-4 py-3">
@@ -870,17 +921,6 @@ const Dashboard = () => {
                 Aktifkan lokasi untuk lihat jarak ke spot.
               </p>
             ) : null}
-          </div>
-          <div className="soft-border rounded-2xl px-4 py-3">
-            <p className="text-xs text-white/60">Legend</p>
-            <div className="mt-3 h-2 w-full rounded-full bg-gradient-to-r from-[#ffd6a3] via-[#ff8a2b] to-[#4fe1c7]" />
-            <div className="mt-2 flex items-center justify-between text-[11px] text-white/50">
-              <span>Rendah</span>
-              <span>Tinggi</span>
-            </div>
-            <p className="mt-2 text-xs text-white/50">
-              Semakin terang, potensi lebih tinggi.
-            </p>
           </div>
           <div className="soft-border rounded-2xl px-4 py-3">
             <p className="text-xs text-white/60">Mode</p>
