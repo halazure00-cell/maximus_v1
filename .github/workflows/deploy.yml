@@ -29,7 +29,9 @@ jobs:
           cache: npm
 
       - name: Install Supabase CLI
-        run: npm install -g supabase
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
 
       - name: Apply Supabase migrations
         run: supabase db push --db-url ${{ secrets.SUPABASE_DB_URL }}
