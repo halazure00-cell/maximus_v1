@@ -28,7 +28,7 @@ const navItems = [
 ]
 
 const BottomNav = ({ onOpenMore }) => (
-  <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/10 bg-night-950/95 backdrop-blur md:hidden">
+  <nav className="app-bottom-nav fixed bottom-0 left-0 right-0 z-30 border-t border-white/10 bg-night-950/95 backdrop-blur md:hidden">
     <div className="grid grid-cols-3 gap-2 px-2 py-3">
       {navItems.map((item) => (
         <NavLink

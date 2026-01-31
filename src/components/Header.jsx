@@ -12,7 +12,7 @@ const Header = ({ onOpenMore }) => {
   const { status } = useSync()
 
   return (
-    <header className="sticky top-0 z-30 border-b border-white/10 bg-night-950/95 backdrop-blur">
+    <header className="app-header sticky top-0 z-30 border-b border-white/10 bg-night-950/95 backdrop-blur">
       <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-10">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-white/40">Rute Cepat</p>

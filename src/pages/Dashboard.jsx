@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet'
+import { Circle, CircleMarker, MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { useEntityList } from '../lib/hooks/useEntityList'
 import { formatCurrency } from '../lib/formatters'
 import { supabase } from '../lib/supabaseClient'
@@ -56,6 +56,22 @@ const UserLocationLayer = ({ location, followMe }) => {
   )
 }
 
+const HeatmapControlsAutoHide = ({ enabled, onAutoHide }) => {
+  useMapEvents({
+    movestart: () => {
+      if (enabled) onAutoHide()
+    },
+    zoomstart: () => {
+      if (enabled) onAutoHide()
+    },
+    dragstart: () => {
+      if (enabled) onAutoHide()
+    },
+  })
+
+  return null
+}
+
 const Dashboard = () => {
   const { user } = useAuth()
   const { showToast } = useAlert()
@@ -80,6 +96,7 @@ const Dashboard = () => {
   const [locationStatus, setLocationStatus] = useState('idle')
   const [followMe, setFollowMe] = useState(false)
   const [controlsOpen, setControlsOpen] = useState(true)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const locationWatchRef = useRef(null)
   const [weatherState, setWeatherState] = useState({ status: 'idle', data: null })
   const [holidayState, setHolidayState] = useState({ status: 'idle', dates: null })
@@ -126,6 +143,32 @@ const Dashboard = () => {
       }
     }
   }, [])
+
+  useEffect(() => {
+    const { body } = document
+    if (!body) return undefined
+    if (isFullscreen) {
+      body.classList.add('heatmap-fullscreen')
+    } else {
+      body.classList.remove('heatmap-fullscreen')
+    }
+    return () => body.classList.remove('heatmap-fullscreen')
+  }, [isFullscreen])
+
+  useEffect(() => {
+    if (!isFullscreen) return undefined
+    const isMobile = typeof window !== 'undefined' && (
+      window.matchMedia?.('(pointer: coarse)')?.matches || window.innerWidth <= 768
+    )
+    if (isMobile) return undefined
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setIsFullscreen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isFullscreen])
 
   useEffect(() => {
     const startWatch = () => {
@@ -490,23 +533,16 @@ const Dashboard = () => {
     controlsTimerRef.current = null
   }, [])
 
-  const resetControlsTimer = useCallback(() => {
+  const scheduleControlsHide = useCallback(() => {
     if (!controlsOpen) return
     clearControlsTimer()
     controlsTimerRef.current = setTimeout(() => {
       setControlsOpen(false)
       updateSettings({ heatmapControlsOpen: false })
-    }, 6000)
+    }, 1200)
   }, [clearControlsTimer, controlsOpen, updateSettings])
 
-  useEffect(() => {
-    if (controlsOpen) {
-      resetControlsTimer()
-    } else {
-      clearControlsTimer()
-    }
-    return clearControlsTimer
-  }, [controlsOpen, resetControlsTimer, clearControlsTimer])
+  useEffect(() => clearControlsTimer, [clearControlsTimer])
 
   const handleControlsToggle = async () => {
     const nextOpen = !controlsOpen
@@ -676,274 +712,310 @@ const Dashboard = () => {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatCard
-          title="Pemasukan Hari Ini"
-          value={formatCurrency(summary.totalIncomeToday)}
-          caption={`7 hari: ${formatCurrency(summary.totalIncomeWeek)}`}
-          accent="text-sunrise-300"
-        />
-        <StatCard
-          title="Pengeluaran Hari Ini"
-          value={formatCurrency(summary.totalExpenseToday)}
-          caption={`7 hari: ${formatCurrency(summary.totalExpenseWeek)}`}
-          accent="text-rose-200"
-        />
-        <StatCard
-          title="Neto Hari Ini"
-          value={formatCurrency(summary.netToday)}
-          caption="Setelah pengeluaran"
-          accent="text-teal-200"
-        />
-      </div>
+  const mapContainerClass = isFullscreen
+    ? 'relative isolate z-50 h-full overflow-hidden'
+    : 'relative isolate z-0 h-80 overflow-hidden rounded-2xl border border-white/10'
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <Link to="/catat?tab=income" className="btn-primary">
-          + Pemasukan
-        </Link>
-        <Link to="/catat?tab=expense" className="btn-outline">
-          + Pengeluaran
-        </Link>
-      </div>
+  const mapShellClass = isFullscreen
+    ? 'fixed inset-0 z-50 bg-night-950 heatmap-overlay'
+    : ''
 
-      <SectionCard title="Peta Panas">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="application/json"
-          className="hidden"
-          onChange={handleImportFile}
-        />
-        <div
-          className="relative isolate z-0 h-80 overflow-hidden rounded-2xl border border-white/10"
-          onPointerDown={resetControlsTimer}
-          onTouchStart={resetControlsTimer}
-        >
-          <MapContainer
-            center={mapCenter}
-            zoom={12}
-            className="h-full w-full z-0"
-          >
-            <TileLayer
-              attribution="&copy; OpenStreetMap contributors"
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            <UserLocationLayer location={liveLocation} followMe={followMe} />
-            <HeatmapLayer points={heatmapData.points} highContrast={highContrastHeatmap} />
-          </MapContainer>
-          <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between">
-            <div className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/80 shadow-lg">
-              Peta Panas
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/80 shadow-lg"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Import
-              </button>
-              <span className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/70 shadow-lg">
-                Bandung
-              </span>
-            </div>
-          </div>
-          <div className="absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2">
-            <button
-              type="button"
-              onClick={handleControlsToggle}
-              className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/80 shadow-lg"
-              aria-expanded={controlsOpen}
-            >
-              {controlsOpen ? 'Sembunyikan' : 'Tampilkan'} Kontrol
-            </button>
-            {controlsOpen ? (
-              <div
-                className="w-48 space-y-2 rounded-3xl border border-white/10 bg-night-950/95 p-3 shadow-lg"
-                onPointerDown={resetControlsTimer}
-                onKeyDown={resetControlsTimer}
-              >
-                <SegmentedControl
-                  options={[
-                    { value: 'order', label: 'Order' },
-                    { value: 'economy', label: 'Untung' },
-                  ]}
-                  value={heatmapGoal}
-                  onChange={handleHeatmapGoalChange}
-                  size="sm"
-                />
-                <SegmentedControl
-                  options={[
-                    { value: 'current', label: 'Sekarang' },
-                    { value: 'all', label: 'Bebas' },
-                  ]}
-                  value={useCurrentHour ? 'current' : 'all'}
-                  onChange={(value) => handleCurrentHourToggle(value === 'current')}
-                  size="sm"
-                />
-                <SegmentedControl
-                  options={[
-                    { value: 'on', label: 'Cuaca On' },
-                    { value: 'off', label: 'Cuaca Off' },
-                  ]}
-                  value={useWeather ? 'on' : 'off'}
-                  onChange={(value) => handleWeatherToggle(value === 'on')}
-                  size="sm"
-                />
-                <SegmentedControl
-                  options={[
-                    { value: 7, label: '7 Hari' },
-                    { value: 30, label: '30 Hari' },
-                  ]}
-                  value={rangeDays}
-                  onChange={setRangeDays}
-                  size="sm"
-                />
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
-                  <div className="flex items-center justify-between text-[11px] text-white/70">
-                    <span>Radius</span>
-                    <span>{Number(distancePenaltyKm).toFixed(1)} km</span>
+  const mapDetails = !isFullscreen ? (
+    <>
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <div className="soft-border rounded-2xl px-4 py-3">
+          <p className="text-xs text-white/60">Rekomendasi cepat</p>
+          {rankedWithDistance.length ? (
+            <div className="mt-2 space-y-2">
+              {rankedWithDistance.map((cell, index) => (
+                <div key={`${cell.lat}-${cell.lng}`} className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-white">
+                      #{index + 1} • {cell.lat.toFixed(mapPrecision)}, {cell.lng.toFixed(mapPrecision)}
+                    </p>
+                    <p className="text-xs text-white/50">
+                      {useCurrentHour
+                        ? 'Sering order di jam ini'
+                        : `Padat dalam ${rangeDays} hari`} • {cell.count} riwayat
+                      {liveLocation && Number.isFinite(cell.distanceKm)
+                        ? ` • ${cell.distanceKm.toFixed(1)} km dari kamu`
+                        : ''}
+                    </p>
                   </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max="6"
-                    step="0.5"
-                    value={distancePenaltyKm}
-                    onChange={(event) => handleDistancePenaltyChange(event.target.value)}
-                    className="mt-2 w-full"
-                  />
+                  <span className="pill bg-white/10 text-white/70">{cell.count}x</span>
                 </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-white/50">
+              Belum ada data yang cukup untuk rekomendasi.
+            </p>
+          )}
+          {!liveLocation ? (
+            <p className="mt-2 text-xs text-white/50">
+              Aktifkan lokasi untuk lihat jarak ke spot.
+            </p>
+          ) : null}
+        </div>
+        <div className="soft-border rounded-2xl px-4 py-3">
+          <p className="text-xs text-white/60">Mode</p>
+          <p className="mt-2 text-sm text-white">
+            {heatmapGoal === 'order' ? 'Potensi Order' : 'Potensi Untung'}
+          </p>
+          <p className="mt-1 text-xs text-white/50">
+            {useCurrentHour ? `Bucket ${currentBucket.label}` : 'Semua jam'} • {rangeDays} hari
+          </p>
+        </div>
+        <div className="soft-border rounded-2xl px-4 py-3">
+          <p className="text-xs text-white/60">Filter</p>
+          <p className="mt-2 text-sm text-white">
+            Radius {Number(distancePenaltyKm).toFixed(1)} km
+          </p>
+          <p className="mt-1 text-xs text-white/50">
+            {useWeather ? 'Cuaca aktif' : 'Cuaca off'} • {useCurrentHour ? 'Sekarang' : 'Bebas'}
+          </p>
+        </div>
+      </div>
+      <p className="mt-2 text-xs text-white/60">
+        {heatmapGoal === 'order'
+          ? `Filter: ${useCurrentHour ? `Bucket ${currentBucket.label}` : 'Semua jam'} • ${rangeDays} hari • Radius ${Number(distancePenaltyKm).toFixed(1)} km`
+          : `${weatherSummary} • ${holidaySummary} • Radius ${Number(distancePenaltyKm).toFixed(1)} km`}
+      </p>
+      {importState.status !== 'idle' ? (
+        <p className="mt-2 text-xs text-white/60">
+          Import: {importState.status} • Total {importState.total} • Valid {importState.valid} • Skip {importState.skipped}
+        </p>
+      ) : null}
+    </>
+  ) : null
+
+  const mapCore = (
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json"
+        className="hidden"
+        onChange={handleImportFile}
+      />
+      <div className={mapContainerClass}>
+        <MapContainer
+          center={mapCenter}
+          zoom={12}
+          className="h-full w-full z-0"
+        >
+          <TileLayer
+            attribution="&copy; OpenStreetMap contributors"
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <UserLocationLayer location={liveLocation} followMe={followMe} />
+          <HeatmapLayer points={heatmapData.points} highContrast={highContrastHeatmap} />
+          <HeatmapControlsAutoHide enabled={controlsOpen} onAutoHide={scheduleControlsHide} />
+        </MapContainer>
+        <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between">
+          <div className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/80 shadow-lg">
+            Peta Panas
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/80 shadow-lg"
+              onClick={() => setIsFullscreen((prev) => !prev)}
+            >
+              {isFullscreen ? 'Keluar' : 'Layar Penuh'}
+            </button>
+            <button
+              type="button"
+              className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/80 shadow-lg"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Import
+            </button>
+            <span className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/70 shadow-lg">
+              Bandung
+            </span>
+          </div>
+        </div>
+        <div className="absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2">
+          <button
+            type="button"
+            onClick={handleControlsToggle}
+            className="rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 text-xs font-semibold text-white/80 shadow-lg"
+            aria-expanded={controlsOpen}
+          >
+            {controlsOpen ? 'Sembunyikan' : 'Tampilkan'} Kontrol
+          </button>
+          {controlsOpen ? (
+            <div className="w-48 space-y-2 rounded-3xl border border-white/10 bg-night-950/95 p-3 shadow-lg">
+              <SegmentedControl
+                options={[
+                  { value: 'order', label: 'Order' },
+                  { value: 'economy', label: 'Untung' },
+                ]}
+                value={heatmapGoal}
+                onChange={handleHeatmapGoalChange}
+                size="sm"
+              />
+              <SegmentedControl
+                options={[
+                  { value: 'current', label: 'Sekarang' },
+                  { value: 'all', label: 'Bebas' },
+                ]}
+                value={useCurrentHour ? 'current' : 'all'}
+                onChange={(value) => handleCurrentHourToggle(value === 'current')}
+                size="sm"
+              />
+              <SegmentedControl
+                options={[
+                  { value: 'on', label: 'Cuaca On' },
+                  { value: 'off', label: 'Cuaca Off' },
+                ]}
+                value={useWeather ? 'on' : 'off'}
+                onChange={(value) => handleWeatherToggle(value === 'on')}
+                size="sm"
+              />
+              <SegmentedControl
+                options={[
+                  { value: 7, label: '7 Hari' },
+                  { value: 30, label: '30 Hari' },
+                ]}
+                value={rangeDays}
+                onChange={setRangeDays}
+                size="sm"
+              />
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+                <div className="flex items-center justify-between text-[11px] text-white/70">
+                  <span>Radius</span>
+                  <span>{Number(distancePenaltyKm).toFixed(1)} km</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="6"
+                  step="0.5"
+                  value={distancePenaltyKm}
+                  onChange={(event) => handleDistancePenaltyChange(event.target.value)}
+                  className="mt-2 w-full"
+                />
               </div>
-            ) : null}
-          </div>
-          <div className="absolute right-3 top-24 z-10 flex flex-col gap-2">
-            <button
-              type="button"
-              className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-night-950/95 text-white/80 shadow-lg ${liveLocationEnabled ? 'bg-sky-400/30 text-sky-100' : ''}`}
-              onClick={handleToggleLiveLocation}
-              aria-label="Lokasi"
-              title="Lokasi"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="3" />
-                <circle cx="12" cy="12" r="8" />
-                <line x1="12" y1="2" x2="12" y2="5" />
-                <line x1="12" y1="19" x2="12" y2="22" />
-                <line x1="2" y1="12" x2="5" y2="12" />
-                <line x1="19" y1="12" x2="22" y2="12" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-night-950/95 text-white/80 shadow-lg ${followMe ? 'bg-sky-400/30 text-sky-100' : ''}`}
-              onClick={handleToggleFollowMe}
-              aria-label="Ikuti saya"
-              title="Ikuti saya"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4L12 2z" />
-              </svg>
-            </button>
-          </div>
-          {locationStatus !== 'idle' ? (
-            <div className="absolute right-3 top-16 z-[999]">
-              {locationStatus === 'loading' ? (
-                <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/70 shadow-lg transition-all duration-300 ease-out">
-                  Lokasi memuat
-                </span>
-              ) : null}
-              {locationStatus === 'error' ? (
-                <span className="rounded-full border border-rose-400/30 bg-rose-400/20 px-3 py-1 text-[11px] font-semibold text-rose-100 shadow-lg transition-all duration-300 ease-out">
-                  Lokasi gagal
-                </span>
-              ) : null}
             </div>
           ) : null}
-          <div className="absolute bottom-3 left-3 z-10 rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 shadow-lg">
-            <p className="text-[11px] text-white/60">Legend</p>
-            <div className="mt-2 h-2 w-24 rounded-full bg-gradient-to-r from-[#ffd6a3] via-[#ff8a2b] to-[#4fe1c7]" />
-            <div className="mt-1 flex items-center justify-between text-[10px] text-white/50">
-              <span>Rendah</span>
-              <span>Tinggi</span>
-            </div>
-          </div>
         </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
-          <div className="soft-border rounded-2xl px-4 py-3">
-            <p className="text-xs text-white/60">Rekomendasi cepat</p>
-            {rankedWithDistance.length ? (
-              <div className="mt-2 space-y-2">
-                {rankedWithDistance.map((cell, index) => (
-                  <div key={`${cell.lat}-${cell.lng}`} className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">
-                        #{index + 1} • {cell.lat.toFixed(mapPrecision)}, {cell.lng.toFixed(mapPrecision)}
-                      </p>
-                      <p className="text-xs text-white/50">
-                        {useCurrentHour
-                          ? 'Sering order di jam ini'
-                          : `Padat dalam ${rangeDays} hari`} • {cell.count} riwayat
-                        {liveLocation && Number.isFinite(cell.distanceKm)
-                          ? ` • ${cell.distanceKm.toFixed(1)} km dari kamu`
-                          : ''}
-                      </p>
-                    </div>
-                    <span className="pill bg-white/10 text-white/70">{cell.count}x</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-2 text-xs text-white/50">
-                Belum ada data yang cukup untuk rekomendasi.
-              </p>
-            )}
-            {!liveLocation ? (
-              <p className="mt-2 text-xs text-white/50">
-                Aktifkan lokasi untuk lihat jarak ke spot.
-              </p>
+        <div className="absolute right-3 top-24 z-10 flex flex-col gap-2">
+          <button
+            type="button"
+            className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-night-950/95 text-white/80 shadow-lg ${liveLocationEnabled ? 'bg-sky-400/30 text-sky-100' : ''}`}
+            onClick={handleToggleLiveLocation}
+            aria-label="Lokasi"
+            title="Lokasi"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <circle cx="12" cy="12" r="8" />
+              <line x1="12" y1="2" x2="12" y2="5" />
+              <line x1="12" y1="19" x2="12" y2="22" />
+              <line x1="2" y1="12" x2="5" y2="12" />
+              <line x1="19" y1="12" x2="22" y2="12" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-night-950/95 text-white/80 shadow-lg ${followMe ? 'bg-sky-400/30 text-sky-100' : ''}`}
+            onClick={handleToggleFollowMe}
+            aria-label="Ikuti saya"
+            title="Ikuti saya"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4L12 2z" />
+            </svg>
+          </button>
+        </div>
+        {locationStatus !== 'idle' ? (
+          <div className="absolute right-3 top-16 z-[999]">
+            {locationStatus === 'loading' ? (
+              <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/70 shadow-lg transition-all duration-300 ease-out">
+                Lokasi memuat
+              </span>
+            ) : null}
+            {locationStatus === 'error' ? (
+              <span className="rounded-full border border-rose-400/30 bg-rose-400/20 px-3 py-1 text-[11px] font-semibold text-rose-100 shadow-lg transition-all duration-300 ease-out">
+                Lokasi gagal
+              </span>
             ) : null}
           </div>
-          <div className="soft-border rounded-2xl px-4 py-3">
-            <p className="text-xs text-white/60">Mode</p>
-            <p className="mt-2 text-sm text-white">
-              {heatmapGoal === 'order' ? 'Potensi Order' : 'Potensi Untung'}
-            </p>
-            <p className="mt-1 text-xs text-white/50">
-              {useCurrentHour ? `Bucket ${currentBucket.label}` : 'Semua jam'} • {rangeDays} hari
-            </p>
+        ) : null}
+        <div className="absolute bottom-3 left-3 z-10 rounded-2xl border border-white/10 bg-night-950/95 px-3 py-2 shadow-lg">
+          <p className="text-[11px] text-white/60">Legend</p>
+          <div className="mt-2 h-2 w-24 rounded-full bg-gradient-to-r from-[#ffd6a3] via-[#ff8a2b] to-[#4fe1c7]" />
+          <div className="mt-1 flex items-center justify-between text-[10px] text-white/50">
+            <span>Rendah</span>
+            <span>Tinggi</span>
           </div>
         </div>
-        <p className="mt-2 text-xs text-white/60">
-          {heatmapGoal === 'order'
-            ? `Filter: ${useCurrentHour ? `Bucket ${currentBucket.label}` : 'Semua jam'} • ${rangeDays} hari • Radius ${Number(distancePenaltyKm).toFixed(1)} km`
-            : `${weatherSummary} • ${holidaySummary} • Radius ${Number(distancePenaltyKm).toFixed(1)} km`}
-        </p>
-        {importState.status !== 'idle' ? (
-          <p className="mt-2 text-xs text-white/60">
-            Import: {importState.status} • Total {importState.total} • Valid{' '}
-            {importState.valid} • Skip {importState.skipped}
-          </p>
-        ) : null}
-      </SectionCard>
+      </div>
+      {mapDetails}
+    </>
+  )
+
+  return (
+    <div className="space-y-6">
+      {!isFullscreen ? (
+        <>
+          <div className="grid gap-4 md:grid-cols-3">
+            <StatCard
+              title="Pemasukan Hari Ini"
+              value={formatCurrency(summary.totalIncomeToday)}
+              caption={`7 hari: ${formatCurrency(summary.totalIncomeWeek)}`}
+              accent="text-sunrise-300"
+            />
+            <StatCard
+              title="Pengeluaran Hari Ini"
+              value={formatCurrency(summary.totalExpenseToday)}
+              caption={`7 hari: ${formatCurrency(summary.totalExpenseWeek)}`}
+              accent="text-rose-200"
+            />
+            <StatCard
+              title="Neto Hari Ini"
+              value={formatCurrency(summary.netToday)}
+              caption="Setelah pengeluaran"
+              accent="text-teal-200"
+            />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <Link to="/catat?tab=income" className="btn-primary">
+              + Pemasukan
+            </Link>
+            <Link to="/catat?tab=expense" className="btn-outline">
+              + Pengeluaran
+            </Link>
+          </div>
+        </>
+      ) : null}
+
+      {isFullscreen ? (
+        <div className={mapShellClass}>{mapCore}</div>
+      ) : (
+        <SectionCard title="Peta Panas">
+          {mapCore}
+        </SectionCard>
+      )}
     </div>
   )
 }
